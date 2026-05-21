@@ -24,7 +24,7 @@ Usage:
   python3 process/extract.py --provider claude --collect <id>    # write + cache batch results
 """
 from __future__ import annotations
-import argparse, hashlib, json, os, sqlite3, sys
+import argparse, hashlib, json, os, socket, sqlite3, sys, urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Literal, Optional
@@ -212,10 +212,39 @@ class ClaudeProvider:
                       "cache_read": getattr(u, "cache_read_input_tokens", 0)}
 
 
+def _ensure_genai_dns():
+    """Some networks fail to resolve only `generativelanguage.googleapis.com` (other
+    googleapis hosts resolve fine). When that's the case, resolve it via public DoH
+    and pin the IP through a getaddrinfo shim — TLS SNI/cert still use the real
+    hostname, which Google's front-end serves. No-op when local DNS already works."""
+    host = "generativelanguage.googleapis.com"
+    try:
+        socket.getaddrinfo(host, 443)
+        return
+    except OSError:
+        pass
+    for doh in ("https://1.1.1.1/dns-query", "https://8.8.8.8/resolve"):
+        try:
+            req = urllib.request.Request(f"{doh}?name={host}&type=A",
+                                         headers={"accept": "application/dns-json"})
+            ips = [a["data"] for a in json.load(urllib.request.urlopen(req, timeout=8))["Answer"]
+                   if a.get("type") == 1]
+            if not ips:
+                continue
+            orig = socket.getaddrinfo
+            socket.getaddrinfo = lambda h, *a, **k: orig(ips[0] if h == host else h, *a, **k)
+            print(f"[dns] {host} unresolved locally; pinned {ips[0]} via DoH ({doh.split('/')[2]})")
+            return
+        except Exception:
+            continue
+    print(f"[dns] warning: could not resolve {host} via DoH; gemini calls may fail")
+
+
 class GeminiProvider:
     name = "gemini"
 
     def __init__(self):
+        _ensure_genai_dns()
         from google import genai
         self.genai = genai
         self.client = genai.Client()   # GEMINI_API_KEY or GOOGLE_API_KEY
@@ -328,7 +357,15 @@ def run_sync(con, rows, provider_name, override):
     print(f"done: {len(rows)} entries -> {n_places} places  ({calls} API calls, {hits} cache hits)")
 
 
-def run_batch_create(con, rows, override):
+def run_batch_create(con, rows, provider, override):
+    (_gemini_batch_create if provider == "gemini" else _claude_batch_create)(con, rows, override)
+
+
+def run_batch_collect(con, batch_id, provider, override):
+    (_gemini_batch_collect if provider == "gemini" else _claude_batch_collect)(con, batch_id, override)
+
+
+def _claude_batch_create(con, rows, override):
     import anthropic
     from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
     from anthropic.types.messages.batch_create_params import Request
@@ -357,7 +394,66 @@ def run_batch_create(con, rows, override):
     print(f"collect when ended:  python3 process/extract.py --provider claude --collect {batch.id}")
 
 
-def run_batch_collect(con, batch_id, override):
+def _gemini_batch_create(con, rows, override):
+    """One Gemini batch job per routed model (Batch Mode ≈ 50% off). Entry id rides
+    on each request's `metadata` so results can be correlated on collect."""
+    _ensure_genai_dns()
+    from google import genai
+    from google.genai import types
+    client = genai.Client()
+    groups, skipped = {}, 0
+    for r in rows:
+        model = model_for("gemini", r["tokens"], override)
+        if cache_get(con, cache_key("gemini", model, user_text(r["text"]))) is not None:
+            skipped += 1
+            continue
+        groups.setdefault(model, []).append(r)
+    if skipped:
+        print(f"{skipped} entries already cached — not resubmitted")
+    cfg = lambda: types.GenerateContentConfig(
+        system_instruction=SYSTEM_PROMPT, response_mime_type="application/json",
+        response_schema=Extraction, max_output_tokens=MAX_TOKENS)
+    for model, grp in groups.items():
+        src = [types.InlinedRequest(contents=user_text(r["text"]), config=cfg(),
+                                    metadata={"entry_id": str(r["entry_id"])}) for r in grp]
+        job = client.batches.create(model=model, src=src,
+                                    config=types.CreateBatchJobConfig(display_name="gotw-extract"))
+        print(f"submitted gemini batch {job.name} ({len(src)} reqs, model {model}, state {job.state})")
+        print(f"collect when done:  python3 process/extract.py --provider gemini --collect {job.name}")
+
+
+def _gemini_batch_collect(con, name, override):
+    _ensure_genai_dns()
+    from google import genai
+    client = genai.Client()
+    job = client.batches.get(name=name)
+    state = str(job.state)
+    if "SUCCEEDED" not in state and "PARTIALLY" not in state:
+        print(f"gemini batch {name} state={state}; not ready")
+        return
+    ok = err = n_places = 0
+    for ir in (job.dest.inlined_responses or []):
+        meta = ir.metadata or {}
+        if ir.error or not getattr(ir, "response", None):
+            err += 1
+            continue
+        try:
+            entry_id = int(meta["entry_id"])
+            text = ir.response.text
+            ext = Extraction.model_validate_json(text)
+        except Exception:
+            err += 1
+            continue
+        row = con.execute("SELECT text, tokens FROM entry WHERE entry_id=?", (entry_id,)).fetchone()
+        model = model_for("gemini", row[1], override)
+        cache_put(con, cache_key("gemini", model, user_text(row[0])), "gemini", model, entry_id, text, {})
+        write_places(con, entry_id, ext)
+        ok += 1
+        n_places += len(ext.places)
+    print(f"collected: {ok} ok, {err} failed -> {n_places} places (all cached)")
+
+
+def _claude_batch_collect(con, batch_id, override):
     import anthropic
     client = anthropic.Anthropic()
     batch = client.messages.batches.retrieve(batch_id)
@@ -423,16 +519,14 @@ def main():
     ensure_cache(con)
 
     if args.collect:
-        run_batch_collect(con, args.collect, args.model)
+        run_batch_collect(con, args.collect, args.provider, args.model)
         return
     rows = pending_entries(con, args.limit)
     print(f"{len(rows)} pending entries (kind='entry', not yet extracted)")
     if args.dry_run:
         dry_run(con, rows, args.provider, args.model)
     elif args.batch:
-        if args.provider != "claude":
-            sys.exit("--batch is implemented for the Claude Batch API only; use sync for gemini")
-        run_batch_create(con, rows, args.model)
+        run_batch_create(con, rows, args.provider, args.model)
     else:
         run_sync(con, rows, args.provider, args.model)
 

@@ -113,14 +113,18 @@ id** against the AAT index, so a wrong/stale id fails loudly rather than silentl
 python3 process/extract.py --dry-run --limit 1                  # prompt + schema + a request (no key)
 python3 process/extract.py --provider gemini --limit 20         # sync (Flash-Lite/Flash)
 python3 process/extract.py --provider claude --limit 20         # sync (Haiku/Sonnet)
-python3 process/extract.py --provider claude --batch            # full corpus via the Batch API
-python3 process/extract.py --provider claude --collect <id>     # write results once the batch ends
+python3 process/extract.py --provider claude --batch            # full corpus via Batch API (≈50% off)
+python3 process/extract.py --provider gemini --batch            # Gemini Batch Mode (≈50% off)
+python3 process/extract.py --provider <p> --collect <id>        # write results once the batch ends
 ```
 
 **Provider-pluggable for a cost/quality A/B.** A thin provider interface backs two implementations —
 `claude` (Haiku→short / Sonnet→long) and `gemini` (Flash-Lite→short / Flash→long) — selectable with
 `--provider`, with `--model NAME` to force one model for every entry. Keys come from `.env`
-(`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`).
+(`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`). **Both providers support the 50%-off batch path** (Claude
+Batch API; Gemini Batch Mode, one job per routed model with the entry id carried on each request's
+`metadata`). The Gemini SDK only resolves `generativelanguage.googleapis.com`, which some networks
+fail to look up — the client auto-pins it via public DoH when local DNS can't.
 
 **Every successful result is cached** in an `llm_cache` table, keyed by `(provider, model,
 prompt+schema signature, entry text)`. Re-runs, re-collects, and switching back to a model you've
