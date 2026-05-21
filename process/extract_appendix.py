@@ -66,8 +66,10 @@ locating note (e.g. "in co. Carlow", "a river of France", "near Rome").
 
 Transcribe EVERY entry on the page. Read the LEFT column fully top-to-bottom, then the RIGHT column.
 For each entry return: headword; equivalents (the listed equivalent name(s), split on commas/semicolons);
-note (any locating phrase, else null). Preserve diacritics. Silently correct obvious OCR errors in the
-printed text. Ignore the running header, page number, and column rules. Do not invent entries."""
+note (any locating phrase, else null). Preserve diacritics, but normalise the archaic long-s (ſ) to a
+modern 's' (e.g. "Dionyſiopolis" → "Dionysiopolis", "Caſtaghora" → "Castaghora"). Silently correct
+obvious OCR errors in the printed text. Ignore the running header, page number, and column rules.
+Do not invent entries."""
 
 PROMPT_SIG = hashlib.sha256((PROMPT + json.dumps(SCHEMA, sort_keys=True)).encode()).hexdigest()[:16]
 
