@@ -24,7 +24,7 @@ Usage:
   python3 process/extract.py --provider claude --collect <id>    # write + cache batch results
 """
 from __future__ import annotations
-import argparse, hashlib, json, os, socket, sqlite3, sys, urllib.request
+import argparse, hashlib, json, os, socket, sqlite3, sys, time, urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Literal, Optional
@@ -359,8 +359,21 @@ def run_sync(con, rows, provider_name, override):
         if cached is None:
             if provider is None:
                 provider = make_provider(provider_name)   # lazy: only construct if we'll call
-            text, usage = provider.generate(model, SYSTEM_PROMPT, utext)
-            Extraction.model_validate_json(text)           # validate before caching
+            text = None
+            for attempt in range(4):                       # backoff over transient 5xx/429
+                try:
+                    text, usage = provider.generate(model, SYSTEM_PROMPT, utext)
+                    Extraction.model_validate_json(text)   # validate before caching
+                    break
+                except Exception as e:
+                    if attempt == 3:
+                        print(f"  [skip]    entry {r['entry_id']:>6} {r['headword_disp'][:26]:26} "
+                              f"-> {type(e).__name__}: {str(e)[:60]}")
+                        text = None
+                    else:
+                        time.sleep(2 ** attempt)
+            if text is None:
+                continue                                   # resumable: re-run picks it up later
             cache_put(con, key, provider_name, model, r["entry_id"], text, usage)
             calls += 1
             tag = f"[{model.split('-')[-1]}]"

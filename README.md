@@ -198,12 +198,20 @@ On the 8 curated demo places this reconciles **8/8** with correct coordinates.
 
 - **Tables** — per Humphrey Southall, many embedded statistical tables were omitted in
   transcription (Vol 5 keeps 140). Recover them from the scanned PDF using each place's
-  `page_start`/`page_end` → detect table regions → OCR/crop into the `place` record.
+  `page_start`/`page_end` → locate the table region → **digitise with a vision/image-LLM**
+  (the cropped page image → structured rows), not plain OCR, which mangles tabular structure.
 - **Maps** — carried as part of the scanned page images (no vector data); detect map regions
   on the relevant scans and render to linked image files.
-- **MapLibre demo** — a static GitHub Pages UI (`docs/`, live at
-  [docuracy.github.io/GOTW](https://docuracy.github.io/GOTW/)) plotting ~100 reconciled
-  places to showcase the pipeline end-to-end.
+- **MapLibre demo** *(done)* — a static GitHub Pages UI plotting the extracted, reconciled places
+  with rich popups, live at [docuracy.github.io/GOTW/map.html](https://docuracy.github.io/GOTW/map.html).
+  Built from the cached Gemini 2.5 Flash set via `process/export_geojson.py` → `docs/places.geojson`.
+
+> **Looking ahead — demographic change over time.** Extraction captures population as a structured
+> `[{year, count}]` time series (the source carries population figures in ~53% of entries, often for
+> multiple census years). Once the full corpus is extracted and reconciled, these mid-19th-century
+> figures can be joined to **modern population data** on the WHG/Wikidata/GeoNames identifiers the
+> reconciliation step attaches — making it possible to visualise long-run demographic change place by
+> place. The structured, ID-linked output is the enabling step; the gazetteer becomes a dated baseline.
 
 ---
 
