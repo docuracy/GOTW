@@ -330,6 +330,24 @@ def write_places(con, entry_id, extraction: Extraction):
 # ---------------------------------------------------------------------------
 # Runners
 # ---------------------------------------------------------------------------
+def run_from_cache(con, provider_name, override):
+    """Materialize place rows from already-cached results — no API calls. Lets you
+    promote an A/B run's cached extractions (e.g. Gemini Flash) into the place table."""
+    rows = con.execute("SELECT entry_id, text, tokens FROM entry "
+                       "WHERE kind='entry' AND text IS NOT NULL ORDER BY entry_id").fetchall()
+    n = p = 0
+    for r in rows:
+        model = model_for(provider_name, r["tokens"], override)
+        cached = cache_get(con, cache_key(provider_name, model, user_text(r["text"])))
+        if cached is None:
+            continue
+        ext = Extraction.model_validate_json(cached)
+        write_places(con, r["entry_id"], ext)
+        n += 1
+        p += len(ext.places)
+    print(f"materialized {p} places from {n} cached entries ({provider_name}/{override or 'routed'})")
+
+
 def run_sync(con, rows, provider_name, override):
     provider = None
     n_places = hits = calls = 0
@@ -512,6 +530,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--batch", action="store_true")
     ap.add_argument("--collect", metavar="BATCH_ID")
+    ap.add_argument("--from-cache", action="store_true",
+                    help="write place rows from cached results only (no API calls)")
     args = ap.parse_args()
 
     con = sqlite3.connect(args.db)
@@ -520,6 +540,9 @@ def main():
 
     if args.collect:
         run_batch_collect(con, args.collect, args.provider, args.model)
+        return
+    if args.from_cache:
+        run_from_cache(con, args.provider, args.model)
         return
     rows = pending_entries(con, args.limit)
     print(f"{len(rows)} pending entries (kind='entry', not yet extracted)")

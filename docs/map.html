@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gazetteer of the World — extracted places</title>
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <style>
+    :root { --ink:#1a2438; --paper:#f4f1ea; --line:#d8d2c4; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; height:100%; font-family:Georgia,"Times New Roman",serif; color:var(--ink); }
+    header { padding:.7rem 1.1rem; background:var(--paper); border-bottom:1px solid var(--line);
+             display:flex; align-items:baseline; gap:.9rem; flex-wrap:wrap; }
+    header h1 { font-size:1.05rem; margin:0; }
+    header .sub { font-size:.8rem; color:#6b6452; font-style:italic; }
+    header a { color:#2a6f97; font-size:.8rem; margin-left:auto; }
+    #map { position:absolute; top:0; left:0; right:0; bottom:0; }
+    .wrap { position:absolute; top:48px; left:0; right:0; bottom:0; }
+    .legend { position:absolute; bottom:18px; left:12px; background:rgba(244,241,234,.94);
+              border:1px solid var(--line); border-radius:6px; padding:.5rem .7rem; font-size:.74rem;
+              font-family:system-ui,sans-serif; line-height:1.7; box-shadow:0 1px 6px rgba(0,0,0,.12); }
+    .legend b { display:block; font-size:.7rem; letter-spacing:.04em; text-transform:uppercase;
+                color:#6b6452; margin-bottom:.2rem; }
+    .dot { display:inline-block; width:11px; height:11px; border-radius:50%; margin-right:.4rem;
+           vertical-align:-1px; border:1px solid rgba(0,0,0,.25); }
+    .maplibregl-popup-content { font-family:Georgia,serif; padding:.8rem .9rem; max-width:300px; border-radius:6px; }
+    .pop h3 { margin:0 0 .15rem; font-size:1.05rem; }
+    .pop .meta { font-size:.82rem; color:#5a5446; margin:0 0 .5rem; }
+    .pop dl { margin:.4rem 0 0; font-size:.82rem; }
+    .pop dt { font-weight:bold; color:#6b6452; font-size:.7rem; text-transform:uppercase; letter-spacing:.03em; margin-top:.45rem; }
+    .pop dd { margin:.05rem 0 0; }
+    .pop ul { margin:.1rem 0 0; padding-left:1.1rem; }
+    .pop .src { margin-top:.6rem; font-size:.74rem; color:#857d6c; font-style:italic; border-top:1px solid var(--line); padding-top:.4rem; }
+    .pop a { color:#2a6f97; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>A Gazetteer of the World — extracted places</h1>
+    <span class="sub">LLM-extracted (Gemini 2.5 Flash) · geolocated via the WHG Reconciliation API</span>
+    <a href="./">← about this project</a>
+  </header>
+  <div class="wrap"><div id="map"></div>
+    <div class="legend" id="legend"><b>Feature type</b></div>
+  </div>
+
+  <script>
+  const COLORS = { P:"#c26b4a", A:"#4a6fa5", H:"#2e8b8b", T:"#8a6d3b", S:"#7a4a6b", X:"#777" };
+  const LABELS = { P:"Populated place", A:"Administrative", H:"Water body", T:"Landform", S:"Structure", X:"People" };
+
+  // Light editorial basemap (CARTO Positron raster + OSM data).
+  const style = {
+    version: 8,
+    sources: { carto: {
+      type: "raster", tileSize: 256,
+      tiles: ["https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+              "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"],
+      attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+    }},
+    layers: [{ id: "carto", type: "raster", source: "carto" }]
+  };
+  const map = new maplibregl.Map({ container: "map", style, center: [10, 35], zoom: 1.6 });
+  map.addControl(new maplibregl.NavigationControl(), "top-right");
+
+  function whgLink(id) {
+    if (!id) return "";
+    const m = id.match(/^place:(?:(wd|gn|tgn):)?(.+)$/);
+    if (!m) return id;
+    const [, ns, ref] = m;
+    const url = ns === "wd" ? `https://www.wikidata.org/wiki/${ref}`
+              : ns === "gn" ? `https://www.geonames.org/${ref}`
+              : ns === "tgn" ? `https://vocab.getty.edu/tgn/${ref}`
+              : /^\d+$/.test(ref) ? `https://whgazetteer.org/places/${ref}/portal` : null;
+    return url ? `<a href="${url}" target="_blank" rel="noopener">${id}</a>` : id;
+  }
+  const esc = s => (s||"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+  function popupHTML(p) {
+    let h = `<div class="pop"><h3>${esc(p.name)}</h3>`;
+    h += `<p class="meta">${esc(p.type)}${p.country ? " · " + esc(p.country) : ""}</p><dl>`;
+    if (p.admin) h += `<dt>Within</dt><dd>${esc(p.admin)}</dd>`;
+    if (p.variants) h += `<dt>Also</dt><dd>${esc(p.variants)}</dd>`;
+    if (p.population) h += `<dt>Population</dt><dd>${esc(p.population)}</dd>`;
+    if (p.notes && p.notes.length) h += `<dt>Notes</dt><dd><ul>${p.notes.map(n=>`<li>${esc(n)}</li>`).join("")}</ul></dd>`;
+    h += `</dl><p class="src">Source: Vol.&nbsp;5, p.&nbsp;${p.page ?? "—"}` +
+         (p.headword && p.headword !== p.name ? ` (under <em>${esc(p.headword)}</em>)` : "") +
+         `<br>WHG match: ${whgLink(p.whg_id)}${p.whg_score!=null?` · score ${p.whg_score}`:""}</p></div>`;
+    return h;
+  }
+
+  map.on("load", async () => {
+    const fc = await (await fetch("./places.geojson")).json();
+    map.addSource("places", { type: "geojson", data: fc });
+    map.addLayer({ id: "pts", type: "circle", source: "places",
+      paint: {
+        "circle-radius": ["interpolate",["linear"],["zoom"], 1,4, 6,7],
+        "circle-color": ["match",["get","fclass"],
+          "P",COLORS.P,"A",COLORS.A,"H",COLORS.H,"T",COLORS.T,"S",COLORS.S,"X",COLORS.X, "#777"],
+        "circle-stroke-width": 1, "circle-stroke-color": "#fff", "circle-opacity": .9
+      }});
+
+    // fit to data
+    const b = new maplibregl.LngLatBounds();
+    fc.features.forEach(f => b.extend(f.geometry.coordinates));
+    if (!b.isEmpty()) map.fitBounds(b, { padding: 60, maxZoom: 6 });
+
+    map.on("click", "pts", e => {
+      const f = e.features[0];
+      new maplibregl.Popup({ maxWidth: "320px" })
+        .setLngLat(f.geometry.coordinates).setHTML(popupHTML(f.properties)).addTo(map);
+    });
+    map.on("mouseenter", "pts", () => map.getCanvas().style.cursor = "pointer");
+    map.on("mouseleave", "pts", () => map.getCanvas().style.cursor = "");
+
+    // legend (only classes present)
+    const present = [...new Set(fc.features.map(f => f.properties.fclass))];
+    const leg = document.getElementById("legend");
+    ["P","A","H","T","S","X"].filter(k => present.includes(k)).forEach(k => {
+      leg.insertAdjacentHTML("beforeend",
+        `<div><span class="dot" style="background:${COLORS[k]}"></span>${LABELS[k]}</div>`);
+    });
+    leg.insertAdjacentHTML("beforeend",
+      `<div style="margin-top:.35rem;color:#857d6c">${fc.features.length} places</div>`);
+  });
+  </script>
+</body>
+</html>

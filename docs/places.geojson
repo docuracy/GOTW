@@ -1,0 +1,1214 @@
+{
+ "type": "FeatureCollection",
+ "metadata": {
+  "source": "A Gazetteer of the World (c.1856), Vol. 5",
+  "extraction": "Gemini 2.5 Flash",
+  "reconciliation": "WHG Reconciliation API",
+  "count": 43
+ },
+ "features": [
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     78.02,
+     27.18
+    ]
+   },
+   "properties": {
+    "name": "Agra",
+    "type": "provinces",
+    "fclass": "A",
+    "feature_term": "province",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "Mahratta dominion reached from here to Cape Comorin"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:wd:Q42941",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     75.86667,
+     28.48333
+    ]
+   },
+   "properties": {
+    "name": "Baroach",
+    "type": "capitals (seats of government)",
+    "fclass": "P",
+    "feature_term": "capital",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "Guzerat › Mahratta Territory",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "capital of Guicowar's sovereignty"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:wd:Q4865953",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     83.49695,
+     18.82094
+    ]
+   },
+   "properties": {
+    "name": "Bassein",
+    "type": "political divisions",
+    "fclass": "A",
+    "feature_term": "British territory",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "Peishwa took refuge here"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:wd:Q4866215",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     87.40807,
+     22.59655
+    ]
+   },
+   "properties": {
+    "name": "Bejapore",
+    "type": "sovereign states",
+    "fclass": "A",
+    "feature_term": "Mahommedan king of Bejapore or Vislapore (kingdom)",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "",
+    "variants": "Vislapore",
+    "population": "",
+    "notes": [
+     "last Mahommedan kingdom"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:wd:Q60751025",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     83.01278,
+     25.31889
+    ]
+   },
+   "properties": {
+    "name": "Benares",
+    "type": "cities",
+    "fclass": "P",
+    "feature_term": "city",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "Peishwa was allowed to retire here"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:wd:Q79980",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -0.24072,
+     51.89369
+    ]
+   },
+   "properties": {
+    "name": "Black Notley",
+    "type": "parishes (religious divisions)",
+    "fclass": "A",
+    "feature_term": "parish",
+    "country": "England",
+    "country_code": "GB",
+    "admin": "Essex",
+    "variants": "",
+    "population": "486 (1631); 520 (1841)",
+    "notes": [],
+    "page": 632,
+    "headword": "Notley (Black)",
+    "whg_id": "place:gn:13283961",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     72.8775,
+     19.07583
+    ]
+   },
+   "properties": {
+    "name": "Bombay",
+    "type": "cities",
+    "fclass": "P",
+    "feature_term": "city",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "British territory of Bassein",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "Ragobah took refuge here",
+     "Bombay government made a treaty with the Peishwa"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:wd:Q1156",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     93.93251,
+     27.82041
+    ]
+   },
+   "properties": {
+    "name": "Cape Comorin",
+    "type": "capes (landforms)",
+    "fclass": "T",
+    "feature_term": "Cape",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "Mahratta dominion reached from Prov. of Agra to here"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:osm:n7164489293",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     77.23149,
+     28.65195
+    ]
+   },
+   "properties": {
+    "name": "Delhi",
+    "type": "cities",
+    "fclass": "P",
+    "feature_term": "city",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "Mahratta conquests extended to here"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:227545",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     80.6644,
+     8.5911
+    ]
+   },
+   "properties": {
+    "name": "Gundwana",
+    "type": "provinces",
+    "fclass": "A",
+    "feature_term": "province",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "Mahratta Territory",
+    "variants": "",
+    "population": "",
+    "notes": [],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:gn:1245352",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     72.655,
+     23.22
+    ]
+   },
+   "properties": {
+    "name": "Guzerat",
+    "type": "provinces",
+    "fclass": "A",
+    "feature_term": "province",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "Mahratta Territory",
+    "variants": "",
+    "population": "",
+    "notes": [],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:wd:Q1061",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     78.67517,
+     29.86215
+    ]
+   },
+   "properties": {
+    "name": "Hoi",
+    "type": "villages",
+    "fclass": "P",
+    "feature_term": "village",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "founder of Holkar family filled a local office here"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:4643618",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     75.8333,
+     22.71792
+    ]
+   },
+   "properties": {
+    "name": "Indore",
+    "type": "capitals (seats of government)",
+    "fclass": "P",
+    "feature_term": "capital",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "Mahratta Territory",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "capital of Holkar's sovereignty"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:227697",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     90.45228,
+     22.43027
+    ]
+   },
+   "properties": {
+    "name": "Khandeish",
+    "type": "political divisions",
+    "fclass": "A",
+    "feature_term": "territory",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "Mahratta Territory",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "original territory of the Mahrattas"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:wd:Q21750401",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     48.66667,
+     33.5
+    ]
+   },
+   "properties": {
+    "name": "Luristan",
+    "type": "districts",
+    "fclass": "A",
+    "feature_term": "mountainous district",
+    "country": "Persia",
+    "country_code": "IR",
+    "admin": "Irak (province)",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "richest and most fruitful part of Irak",
+     "abundantly watered by numerous streams",
+     "agriculture neglected except in vicinity of certain places",
+     "natives are rude, wandering, and pastoral"
+    ],
+    "page": 1,
+    "headword": "Luristan",
+    "whg_id": "place:tgn:8895732",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     48.77361,
+     33.13167
+    ]
+   },
+   "properties": {
+    "name": "Luristan-Buzurg",
+    "type": "political divisions",
+    "fclass": "A",
+    "feature_term": "division",
+    "country": "Persia",
+    "country_code": "IR",
+    "admin": "Luristan (district) › Irak (province)",
+    "variants": "L.-Buzurg",
+    "population": "",
+    "notes": [
+     "separated from Luristan-Kuchuk by the Dizful River"
+    ],
+    "page": 1,
+    "headword": "Luristan",
+    "whg_id": "place:wd:Q5793110",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     45.55545,
+     35.90657
+    ]
+   },
+   "properties": {
+    "name": "Luristan-Kuchuk",
+    "type": "political divisions",
+    "fclass": "A",
+    "feature_term": "division",
+    "country": "Persia",
+    "country_code": "IR",
+    "admin": "Luristan (district) › Irak (province)",
+    "variants": "L.-Kuchuk",
+    "population": "",
+    "notes": [
+     "separated from Luristan-Buzurg by the Dizful River",
+     "subdivided into Pishkuh and Pusht-i-kuh"
+    ],
+    "page": 1,
+    "headword": "Luristan",
+    "whg_id": "place:osm:n2486439418",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     74.0333,
+     26.65
+    ]
+   },
+   "properties": {
+    "name": "Mahratta Territory",
+    "type": "political divisions",
+    "fclass": "A",
+    "feature_term": "extensive district",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "politically extended across what is called the peninsula",
+     "original territory said to have been Khandeish",
+     "possessed a narrow track of country on the W side of the peninsula, extending from the 15th to the 21st parallel of N lat.",
+     "divided into 6 separate independent sovereignties"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:wd:Q2544240",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     5.78688,
+     43.82883
+    ]
+   },
+   "properties": {
+    "name": "Manosque",
+    "type": "towns",
+    "fclass": "P",
+    "feature_term": "canton, commune, and town",
+    "country": "France",
+    "country_code": "FR",
+    "admin": "Forcalquier arrondissement › Basses-Alpes department",
+    "variants": "",
+    "population": "5,311 (1841)",
+    "notes": [
+     "Canton comprises 6 communes.",
+     "Canton population in 1831, 9,476; in 1841, 9,208.",
+     "Altitude of 123 yards above sea-level.",
+     "At the foot of a hill on the summit of which are a tower and several ruins, which bear the name of Old Manosque."
+    ],
+    "page": 105,
+    "headword": "Manosque",
+    "whg_id": "place:gn:2996180",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     8.6561,
+     47.63108
+    ]
+   },
+   "properties": {
+    "name": "Marthalen",
+    "type": "towns",
+    "fclass": "P",
+    "feature_term": "town",
+    "country": "Switzerland",
+    "country_code": "CH",
+    "admin": "Zurich canton",
+    "variants": "",
+    "population": "1,401 (1850)",
+    "notes": [
+     "8 Catholics in 1850"
+    ],
+    "page": 138,
+    "headword": "Marthalen",
+    "whg_id": "place:gn:11963159",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.01644,
+     40.2619
+    ]
+   },
+   "properties": {
+    "name": "Mazuecos",
+    "type": "towns",
+    "fclass": "P",
+    "feature_term": "town",
+    "country": "Spain",
+    "country_code": "ES",
+    "admin": "Province of Madrid",
+    "variants": "",
+    "population": "560",
+    "notes": [
+     "near the Valdegonate"
+    ],
+    "page": 177,
+    "headword": "Mazuecos",
+    "whg_id": "place:gn:6357949",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     0.36725,
+     51.26205
+    ]
+   },
+   "properties": {
+    "name": "Mereworth",
+    "type": "parishes (religious divisions)",
+    "fclass": "A",
+    "feature_term": "parish",
+    "country": "England",
+    "country_code": "GB",
+    "admin": "Kent",
+    "variants": "",
+    "population": "862 (1841)",
+    "notes": [],
+    "page": 209,
+    "headword": "Mereworth",
+    "whg_id": "place:gn:7295914",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     10.33175,
+     51.07617
+    ]
+   },
+   "properties": {
+    "name": "Mihla",
+    "type": "market towns",
+    "fclass": "P",
+    "feature_term": "market-town",
+    "country": "Germany",
+    "country_code": "DE",
+    "admin": "Grand-duchy of Saxe-Weimar › Principality of Eisenach › Bailiwick of Kreutzburg",
+    "variants": "",
+    "population": "1,294",
+    "notes": [
+     "manufactories of velvet",
+     "agriculture"
+    ],
+    "page": 273,
+    "headword": "Mihiel (Saint)",
+    "whg_id": "place:gn:2871166",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     18.56972,
+     43.22306
+    ]
+   },
+   "properties": {
+    "name": "Modrich",
+    "type": "market towns",
+    "fclass": "P",
+    "feature_term": "market-town",
+    "country": "Turkey in Europe",
+    "country_code": "BA",
+    "admin": "Bosnia › sanjak",
+    "variants": "",
+    "population": "",
+    "notes": [],
+    "page": 315,
+    "headword": "Modrich",
+    "whg_id": "place:wd:Q21740930",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     1.2105,
+     44.61988
+    ]
+   },
+   "properties": {
+    "name": "Montclera",
+    "type": "towns",
+    "fclass": "P",
+    "feature_term": "town",
+    "country": "France",
+    "country_code": "FR",
+    "admin": "Lot",
+    "variants": "",
+    "population": "700",
+    "notes": [],
+    "page": 350,
+    "headword": "Montclera",
+    "whg_id": "place:gn:2992811",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -2.03547,
+     57.60178
+    ]
+   },
+   "properties": {
+    "name": "Mormond-Hill",
+    "type": "hills (landforms)",
+    "fclass": "T",
+    "feature_term": "conical hill",
+    "country": "Scotland",
+    "country_code": "GB",
+    "admin": "Buchan › Aberdeenshire",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "810 ft. above sea-level",
+     "good land-mark to mariners"
+    ],
+    "page": 384,
+    "headword": "Mormond-Hill",
+    "whg_id": "place:osm:n5998507631",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     82.47944,
+     21.53972
+    ]
+   },
+   "properties": {
+    "name": "Mulla Ghat",
+    "type": "valleys (landforms)",
+    "fclass": "T",
+    "feature_term": "pass",
+    "country": "India",
+    "country_code": "IN",
+    "admin": "Sahyadri range › Konkan",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "Leading from Kurar to Mahajun"
+    ],
+    "page": 416,
+    "headword": "Mulla Ghat",
+    "whg_id": "place:wd:Q26814226",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     79.0,
+     21.0
+    ]
+   },
+   "properties": {
+    "name": "Nagpore",
+    "type": "capitals (seats of government)",
+    "fclass": "P",
+    "feature_term": "capital",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "Gundwana Province › Mahratta Territory",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "capital of Bhonslah's sovereignty",
+     "founded a new kingdom here"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:wd:Q1797367",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     114.76064,
+     25.6638
+    ]
+   },
+   "properties": {
+    "name": "Nan-Kang",
+    "type": "towns",
+    "fclass": "P",
+    "feature_term": "district and town",
+    "country": "China",
+    "country_code": "CN",
+    "admin": "Keang-se (province) › Nan-gan-fu (division)",
+    "variants": "",
+    "population": "",
+    "notes": [],
+    "page": 447,
+    "headword": "Nan-Kang",
+    "whg_id": "place:osm:n244081474",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     77.30387,
+     10.81495
+    ]
+   },
+   "properties": {
+    "name": "Neera River",
+    "type": "rivers",
+    "fclass": "H",
+    "feature_term": "river",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "",
+    "variants": "",
+    "population": "",
+    "notes": [],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:gn:11572240",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     4.96667,
+     50.9
+    ]
+   },
+   "properties": {
+    "name": "Netelzeep",
+    "type": "communes (administrative)",
+    "fclass": "A",
+    "feature_term": "commune",
+    "country": "Belgium",
+    "country_code": "BE",
+    "admin": "Brabant province › Becquevort department",
+    "variants": "",
+    "population": "211",
+    "notes": [],
+    "page": 491,
+    "headword": "Netelzeep",
+    "whg_id": "place:tgn:7252509",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -2.8375,
+     55.0936
+    ]
+   },
+   "properties": {
+    "name": "Nichol Forest",
+    "type": "parishes (religious divisions)",
+    "fclass": "A",
+    "feature_term": "chapelry",
+    "country": "United Kingdom",
+    "country_code": "GB",
+    "admin": "Cumberland › Kirk-Andrew's parish",
+    "variants": "",
+    "population": "907 (1831); 825 (1841)",
+    "notes": [],
+    "page": 576,
+    "headword": "Nichol Forest",
+    "whg_id": "place:wd:Q2289031",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -3.0049,
+     42.3472
+    ]
+   },
+   "properties": {
+    "name": "Ojacastro",
+    "type": "towns",
+    "fclass": "P",
+    "feature_term": "town",
+    "country": "Spain",
+    "country_code": "ES",
+    "admin": "prov. Logrono",
+    "variants": "",
+    "population": "890",
+    "notes": [
+     "on the l. bank of the Oja"
+    ],
+    "page": 672,
+    "headword": "Ojacastro",
+    "whg_id": "place:gn:3115217",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     89.8667,
+     23.3167
+    ]
+   },
+   "properties": {
+    "name": "Oojein",
+    "type": "capitals (seats of government)",
+    "fclass": "P",
+    "feature_term": "capital",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "Mahratta Territory",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "capital of Sindia's sovereignty"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:wd:Q13149875",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -1.36944,
+     60.11889
+    ]
+   },
+   "properties": {
+    "name": "Oxna",
+    "type": "islands (landforms)",
+    "fclass": "T",
+    "feature_term": "small island",
+    "country": "United Kingdom",
+    "country_code": "GB",
+    "admin": "Tingwall parish › Shetland",
+    "variants": "",
+    "population": "19 (1841); 21 (1851)",
+    "notes": [],
+    "page": 740,
+    "headword": "Oxna",
+    "whg_id": "place:wd:Q597851",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -68.64199,
+     49.0031
+    ]
+   },
+   "properties": {
+    "name": "Papinachois",
+    "type": "rivers",
+    "fclass": "H",
+    "feature_term": "river",
+    "country": "Canada",
+    "country_code": "CA",
+    "admin": "Lower Canada",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "Flows SSW",
+     "Course of about 60 miles",
+     "Joins the Saguenay on the left bank"
+    ],
+    "page": 777,
+    "headword": "Papinachois",
+    "whg_id": "place:gn:6096656",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     50.67376,
+     36.68202
+    ]
+   },
+   "properties": {
+    "name": "Pishkuh",
+    "type": "political divisions",
+    "fclass": "A",
+    "feature_term": "subdivision",
+    "country": "Persia",
+    "country_code": "IR",
+    "admin": "Luristan-Kuchuk (division) › Luristan (district) › Irak (province)",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "lying east of the Zagros chain"
+    ],
+    "page": 1,
+    "headword": "Luristan",
+    "whg_id": "place:osm:n3355115056",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     77.99664,
+     30.73925
+    ]
+   },
+   "properties": {
+    "name": "Punah",
+    "type": "capitals (seats of government)",
+    "fclass": "P",
+    "feature_term": "capital",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "Mahratta Territory",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "residence and capital of the Peishwa",
+     "Peishwa reinstated in May 1803"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:osm:n7937435983",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     57.55917,
+     30.42528
+    ]
+   },
+   "properties": {
+    "name": "Pusht-i-kuh",
+    "type": "political divisions",
+    "fclass": "A",
+    "feature_term": "subdivision",
+    "country": "Persia",
+    "country_code": "IR",
+    "admin": "Luristan-Kuchuk (division) › Luristan (district) › Irak (province)",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "lying west of the Zagros chain"
+    ],
+    "page": 1,
+    "headword": "Luristan",
+    "whg_id": "place:wd:Q5728087",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     5.55099,
+     48.88746
+    ]
+   },
+   "properties": {
+    "name": "Saint-Mihiel",
+    "type": "cantons (administrative bodies)",
+    "fclass": "A",
+    "feature_term": "canton",
+    "country": "France",
+    "country_code": "FR",
+    "admin": "Meuse (department) › Commercy (arrondissement)",
+    "variants": "",
+    "population": "16,229 (1831); 17,180 (1841)",
+    "notes": [
+     "comprises 28 communes"
+    ],
+    "page": 273,
+    "headword": "Mihiel (Saint)",
+    "whg_id": "place:gn:2977948",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     5.55099,
+     48.88746
+    ]
+   },
+   "properties": {
+    "name": "Saint-Mihiel",
+    "type": "towns",
+    "fclass": "P",
+    "feature_term": "commune, and town",
+    "country": "France",
+    "country_code": "FR",
+    "admin": "Meuse (department) › Commercy (arrondissement)",
+    "variants": "",
+    "population": "6,462 (1841)",
+    "notes": [
+     "Church of St. Etienne with sculpture by Ligier-Michier",
+     "communal college",
+     "public library",
+     "printing establishment"
+    ],
+    "page": 273,
+    "headword": "Mihiel (Saint)",
+    "whg_id": "place:gn:2977948",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -7.93889,
+     37.01694
+    ]
+   },
+   "properties": {
+    "name": "San Pédor",
+    "type": "towns",
+    "fclass": "P",
+    "feature_term": "town",
+    "country": "Spain",
+    "country_code": "ES",
+    "admin": "province of Barcelona",
+    "variants": "",
+    "population": "2,450",
+    "notes": [
+     "Has manufactories of cottons",
+     "Has distilleries of brandy"
+    ],
+    "page": 820,
+    "headword": "Pedor (San)",
+    "whg_id": "place:wd:Q2451102",
+    "whg_score": 100.0
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     74.50964,
+     32.17818
+    ]
+   },
+   "properties": {
+    "name": "Sattarah",
+    "type": "fortresses",
+    "fclass": "S",
+    "feature_term": "fortress",
+    "country": "Hindostan",
+    "country_code": "IN",
+    "admin": "Mahratta Territory",
+    "variants": "",
+    "population": "",
+    "notes": [
+     "fortress where Ram-Rajah was confined"
+    ],
+    "page": 49,
+    "headword": "Mahratta Territory",
+    "whg_id": "place:osm:n2659656674",
+    "whg_score": 100.0
+   }
+  }
+ ]
+}

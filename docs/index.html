@@ -39,18 +39,20 @@
       <a href="https://whgazetteer.org/">World Historical Gazetteer</a> via its
       Reconciliation API.</p>
 
-    <h2>Coming here</h2>
-    <p>An interactive <strong>MapLibre</strong> demo plotting a sample of extracted
-      places, geolocated through the WHG Reconciliation API.</p>
-    <div id="map"></div>
+    <h2>Explore the map</h2>
+    <p><strong><a href="map.html">Open the interactive map →</a></strong><br>
+      A sample of places extracted by an LLM (Gemini&nbsp;2.5&nbsp;Flash) and geolocated through the
+      WHG Reconciliation API. Markers carry rich popups — feature type, containing region, population,
+      notes, source page, and the reconciliation match.</p>
 
     <h2>Pipeline status</h2>
     <ul>
       <li>✓ HTML parsed to a structured store (entries, cross-refs, tables, page provenance)</li>
       <li>✓ Toponyms normalised from UPPERCASE to title case</li>
       <li>✓ Getty AAT feature-type shortlist drafted and validated</li>
-      <li>… LLM extraction of places + disambiguation context</li>
-      <li>… WHG reconciliation, table recovery, and map extraction from the page scans</li>
+      <li>✓ LLM extraction of places + disambiguation context (Claude &amp; Gemini, cached)</li>
+      <li>✓ WHG reconciliation → coordinates, shown on the map</li>
+      <li>… table recovery and map-image extraction from the page scans</li>
     </ul>
 
     <p>Worked example —
