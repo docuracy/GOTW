@@ -1,146 +1,170 @@
 # Gazetteer of the World → Linked Data
 
-Transforming *A Gazetteer of the World* (c. 1856,
-[archive.org/details/agazetteerworld00unkngoog](https://archive.org/details/agazetteerworld00unkngoog))
-into structured linked data as an **authority gazetteer** for the
-[World Historical Gazetteer](https://whgazetteer.org/) (WHG). Places are typed
-with [Getty AAT](https://www.getty.edu/research/tools/vocabularies/aat/) concepts
-and geolocated against WHG's indices via its
-[Reconciliation API](https://docs.whgazetteer.org/content/technical/apis.html#reconciliation-service-api).
+Turning a 19th-century printed gazetteer into a structured, AAT-typed, geolocated
+**authority gazetteer** for the [World Historical Gazetteer](https://whgazetteer.org/) (WHG).
 
-## Sources
+> **This repo doubles as a worked exemplar** for digital-humanities practitioners who
+> want to extract structured data from a historical PDF and geolocate the places it
+> names. The [Method](#the-method-reusable) section below is written to be lifted and
+> adapted; the rest documents how this project instantiates it.
 
-| Asset | Notes |
-|-------|-------|
-| `data/pdf/agazetteerworld00unkngoog.pdf` | 919-page scanned book. Every page is a raster scan (no vector layer); maps are baked into the page images. |
-| `data/html/gotw_vol5_all_web_v1.html` | OCR-derived transcript, 1 of **7** files covering the whole work. Volume 5 here, printed pages 1–874. |
-| `data/gotw.sqlite` | Working store, generated from the HTML (see below). Not committed; rebuild with the parser. |
+Source: *A Gazetteer of the World* (c. 1856),
+[archive.org/details/agazetteerworld00unkngoog](https://archive.org/details/agazetteerworld00unkngoog).
 
-The HTML transcription was produced under **Prof. Humphrey Southall** (Director,
-GB Historical GIS, University of Portsmouth) — see [Credits](#credits).
+---
 
-## Pipeline
+## The method (reusable)
+
+A general recipe for *historical PDF → geolocated linked data*, with the transferable
+lesson at each step:
+
+| Stage | What you do | Transferable lesson |
+|------|-------------|---------------------|
+| **0. Get text** | Obtain (or OCR) a text transcript of the PDF. | OCR is rarely clean; plan to correct it, ideally *inside* a step you're already paying for. |
+| **1. Parse to records** | Split the flow into one row per source record, keeping **provenance** (page, raw markup). | Parse defensively: the obvious delimiter (here, `<p>`) lies — page breaks fall mid-record, cross-references and continuations masquerade as entries. Validate against spot-checks, not assumptions. |
+| **2. Model the target** | Decide your unit of interest and a controlled vocabulary for typing it. | Mine the *actual* data for its categories before choosing vocabulary terms; resolve them to real authority IDs (here Getty AAT) and **validate every ID** so a typo fails loudly. |
+| **3. LLM extraction** | Send each record to an LLM for structured output: the entity, its type, and the **context needed to disambiguate** it. | Use schema-constrained (structured) output, cache the shared prompt prefix, route by length to control cost, and **estimate cost up front** from a real sample. Fold OCR correction into this same pass. |
+| **4. Reconcile / geolocate** | Match each place against a gazetteer service to attach coordinates and identifiers. | Disambiguation context (containing region, neighbours, coordinates) is what makes reconciliation accurate — extract it deliberately in step 3. |
+| **5. Publish** | Export linked data; show it. | A small interactive demo (here MapLibre on GitHub Pages) communicates the result better than a data dump. |
+
+Everything here runs on the Python standard library plus `beautifulsoup4`, `lxml`,
+`tiktoken`, `pymupdf`, `anthropic`, and `pydantic` (see [Setup](#setup)).
+
+---
+
+## This project's pipeline
 
 ```
 HTML transcript ──parse──▶ SQLite (entry) ──LLM extract──▶ SQLite (place)
-                                                  │
-                                                  ├─ AAT feature typing
-                                                  ├─ multi-place splitting ("—Also …")
-                                                  ├─ cross-reference resolution ("See …")
-                                                  └─ geographic context for disambiguation
-                                                            │
-                                              WHG Reconciliation API ──▶ coordinates
-                                                            │
-                                              MapLibre demo (GitHub Pages)
+                                                  │              │
+                              AAT typing · multi-place split ·   │
+                              cross-ref resolution · OCR fix ·   │
+                              disambiguation context             ▼
+                                                   WHG Reconciliation API ──▶ coordinates
+                                                                  │
+                                                      MapLibre demo (GitHub Pages)
 ```
 
-### 1. Parsing — `process/parse_html.py` *(done)*
+| Asset | Notes |
+|-------|-------|
+| `data/pdf/…pdf` | 919-page scanned book. Every page is a raster scan (no vector layer); maps are baked into the page images. |
+| `data/html/…html` | OCR transcript, 1 of **7** files covering the whole work. Volume 5 here, printed pages 1–874. |
+| `data/gotw.sqlite` | Working store, generated by the parser. Not committed — rebuild from source. |
+| `data/aat_shortlist.json` | 47 validated Getty AAT feature-type concepts (committed). |
+
+The HTML transcription was produced under **Prof. Humphrey Southall** — see [Credits](#credits).
+
+### Setup
+
+```bash
+pip install anthropic beautifulsoup4 lxml tiktoken pymupdf pydantic
+# Secrets go in .env (git-ignored): WHG_API_TOKEN, ANTHROPIC_API_KEY
+```
+
+### 1. Parse — `process/parse_html.py` *(done)*
 
 ```bash
 python3 process/parse_html.py data/html/gotw_vol5_all_web_v1.html --db data/gotw.sqlite
 ```
 
-The transcript is one long flow of `<p>` elements. The parser handles the
-structure that makes naive splitting fail:
+The transcript is one long flow of `<p>` elements. The parser handles what breaks
+naive splitting:
 
-- **Page markers `[[N]]`** appear inside `<br/>` runs and can fall *mid-paragraph*,
-  gluing the tail of one place onto a new headword. We split on them and record
-  page provenance (`page_start`/`page_end`) — essential for recovering content
-  from the PDF later.
-- **Continuation paragraphs** (overflow prose and `<em>`Climate`</em>.]` /
-  `History.]` section headers) are merged back into the place they describe.
-- **Cross-references** (`LUTTICH. See LIEGE.`) are classified as `kind='crossref'`
-  with the target captured in `see_target`.
-- **Statistical tables** are attached to their place (`n_tables`); see the
-  [table-recovery](#3-table-recovery-todo) note.
-- **Toponym case** — headwords are printed UPPERCASE; `headword_disp` holds a
-  title-cased form (`LUS-LA-CROIX-HAUTE` → `Lus-la-Croix-Haute`) with
-  multilingual connecting particles (`de`, `la`, `von`, `of`, …) lower-cased.
+- **Page markers `[[N]]`** sit inside `<br/>` runs and can fall *mid-paragraph*, gluing
+  the tail of one place onto a new headword. We split on them and record page provenance
+  (`page_start`/`page_end`) — essential for going back to the PDF later.
+- **Continuation paragraphs** (overflow prose, `<em>Climate</em>.]` / `History.]` section
+  headers) are merged back into the place they describe.
+- **Cross-references** (`Luttich. See Liege.`) are classified as `kind='crossref'` with
+  the target in `see_target`.
+- **Statistical tables** are attached to their place (`n_tables`) — see [table recovery](#table-recovery-todo).
+- **Toponym case** — headwords are printed UPPERCASE; `headword_disp` holds a title-cased
+  form (`LUS-LA-CROIX-HAUTE` → `Lus-la-Croix-Haute`) with multilingual particles
+  (`de`, `la`, `von`, `of`, …) lower-cased.
 
-**Volume 5 result:** 12,477 entries · 730 cross-references · 140 tables ·
-1,128 multi-place entries (≈14,800 places once split) · pages 1–874.
+**Volume 5 result:** 12,477 entries · 730 cross-references · 140 tables · 1,128 multi-place
+entries (≈14,800 places once split) · pages 1–874.
 
-#### Schema
+**Schema:** `source` (one row per HTML file) → `entry` (one row per headword block) →
+`place` (the unit of interest; populated by step 3). We use **SQLite, not DuckDB**, because
+the workload is write-heavy incremental updates as extraction and reconciliation complete;
+export to Parquet/DuckDB for analytics whenever you want.
 
-- **`source`** — one row per HTML file (sha256, counts, page range).
-- **`entry`** — one row per logical headword block. Key columns: `kind`,
-  `headword` / `headword_raw` / `headword_disp`, `page_start`/`page_end`,
-  `raw_html`, `text`, `n_tables`, `n_also`, `see_target`, `tokens`.
-- **`place`** — *the unit of interest*; populated by the LLM stage. One row per
-  place (a multi-place entry yields several). Holds `extraction` (JSON),
-  `aat_type_id`, reconciliation result (`whg_match_id`, `lat`, `lon`), `status`.
+### 2. Feature-type vocabulary — `process/aat_resolve.py`, `process/build_aat_shortlist.py` *(done)*
 
-> **Why SQLite (not DuckDB)?** The workload is write-heavy and incremental —
-> each place's row is updated as LLM extraction and then reconciliation complete.
-> SQLite suits many small single-writer updates; DuckDB shines for columnar
-> analytics. We can export to Parquet/DuckDB for analysis at any point; the
-> schema translates directly.
+```bash
+python3 process/aat_resolve.py            # build/validate the AAT index from the local Getty dump
+python3 process/build_aat_shortlist.py    # write + self-validate data/aat_shortlist.json
+```
 
-### 2. LLM extraction → `place` *(next)*
+The descriptors that open each entry ("…, a **town/parish/river/island** of …") were mined
+to find the categories actually present, then resolved to **real Getty AAT concept ids** and
+grouped by WHG fclass: populated places, administrative divisions, water bodies, terrestrial
+landforms, fortifications, and (for completeness) peoples. The builder **self-validates every
+id** against the AAT index, so a wrong/stale id fails loudly rather than silently mis-typing.
 
-Each `entry` is sent to an LLM to produce one structured record **per place**:
-- canonical `name` (+ variants), feature type as a **Getty AAT** concept id,
-- the **geographic context needed to disambiguate** the toponym (containing
-  country / province / district, nearby places + bearings/distances, coordinates
-  if printed, population, area),
-- multi-place splitting on `—Also …` boundaries (`n_also` is a heuristic count),
-- cross-reference resolution using `see_target`.
+> Gotcha worth knowing: in the Getty `AATOut_2Terms.nt` dump each concept has a `prefLabel`
+> *per language*; the English term URI ends `-en`. Keep the `-en` one or you silently drop
+> most concepts. The dump (~59k concepts) is complete as of 2026-01 — no re-download needed.
 
-AAT integration follows the approach in
-`../London_Customs_Accounts/AAT_INTEGRATION_PLAN.md`: load the Getty AAT bulk
-export locally and supply a **shortlist of relevant concepts** to the model.
+### 3. LLM extraction → `place` — `process/extract.py` *(done)*
 
-The shortlist is **drafted and validated** — `data/aat_shortlist.json`, built by
-`process/build_aat_shortlist.py` from the feature-type descriptors mined across
-Volume 5 and resolved to real AAT ids via `process/aat_resolve.py`. 47 concepts
-across WHG fclasses: populated places (town/village/hamlet/city/capital/port),
-administrative divisions (parish/commune/canton/district/department/county/
-province/state/country…), water bodies (river/lake/bay/strait/creek…),
-terrestrial landforms (island/cape/mountain/peninsula/valley/volcano…), and
-fortifications. The AAT dump (`~/Documents/GitHub/whg3/data/aat/`, ~59k concepts,
-2026-01 release) is complete and current — no re-download needed.
+```bash
+python3 process/extract.py --dry-run --limit 1   # inspect prompt + schema + a request (no API key)
+python3 process/extract.py --limit 20            # sync-process 20 pending entries
+python3 process/extract.py --batch               # submit all pending entries to the Batch API
+python3 process/extract.py --collect <batch_id>  # write results once the batch ends
+```
 
-**Cost estimate (full 7-file corpus)** — extrapolated ×7 from Volume 5:
+Each entry yields one **structured record per place** (Pydantic-validated against a JSON
+schema): canonical name + variants, the feature type as a **Getty AAT id** (a closed enum —
+the model can only pick a shortlist concept or `"other"`), and the disambiguation context —
+country, administrative hierarchy, nearby places with bearing/distance, coordinates
+(DMS → decimal), population, area. Multi-place entries split on "—Also …"; cross-references
+are resolved from `see_target`.
 
-| | value |
-|---|---|
-| Entries / cross-refs / places | ≈87,000 / 5,100 / **104,000** |
-| Input text | ≈13.0M tokens |
-| **Total (Batch API, length-routed)** | **≈ $84** |
-| Range | $72 (all-Haiku) … $216 (all-Sonnet) |
+Design choices that generalise:
+- **Structured output** (`output_config` json_schema) guarantees parseable, schema-valid records.
+- **Prompt caching** — the instructions + AAT shortlist + schema are a stable cached prefix;
+  only the per-entry text varies, so the big shared prefix is near-free across thousands of calls.
+- **Length-routed models** — short/standard entries → Haiku, long dense entries → Sonnet
+  (configurable at the top of `extract.py`; switch to Opus there if you prefer maximum quality).
+- **OCR correction in-pass** — the transcript is uncorrected OCR (`commnne`→commune,
+  `villnge`→village, `fortres`→fortress…). The model fixes obvious garbling while it reads and
+  logs each fix to an `ocr_corrections` QA trail — no separate, extra-cost correction pass.
 
-Routing sends short/standard entries (≤800 tok, ~98%) to Haiku in batches and
-the long dense entries to Sonnet. Cost is dominated by *output* (~25M tokens of
-structured JSON); prompt caching makes the shared instruction/AAT/schema prefix
-near-free. Realtime (non-Batch) ≈ 2×. Assumed list rates are documented in
-`process/` and should be reconfirmed before committing spend. Re-derive exactly
-once all 7 files are parsed: `SELECT SUM(tokens) FROM entry`.
+**Cost (full 7-file corpus)** — extrapolated ×7 from Volume 5 by `process/estimate_cost.py`:
+≈87,000 entries / ≈104,000 places / ≈13M input tokens → **≈ $84 via the Batch API**
+(range $72 all-Haiku … $216 all-Sonnet; ~2× for realtime). Dominated by *output* tokens;
+prompt caching makes the shared prefix negligible. ⚠️ Rates are assumed list prices — confirm
+before committing spend. Re-derive exactly once all 7 files are parsed: `SELECT SUM(tokens) FROM entry`.
 
-### 3. Table recovery *(todo)*
+### 4. Reconcile against WHG *(next)*
 
-Per Humphrey Southall, **many embedded statistical tables were omitted** during
-transcription. Volume 5 retains 140 tables; the omitted ones generally left no
-textual trace (their introductory sentence was dropped too), so HTML-only
-detection is unreliable. Recovery plan: use each place's `page_start`/`page_end`
-to locate the relevant **PDF scan pages**, detect table regions, and OCR/crop
-them back into the `place` record.
+Geolocate each `place` via WHG's
+[Reconciliation API](https://docs.whgazetteer.org/content/technical/apis.html#reconciliation-service-api),
+sending the extracted disambiguation context (name + containing region/country) as the query
+and writing the chosen match's id + coordinates back to `place` (`whg_match_id`, `lat`, `lon`).
+The API token is read from `.env` (`WHG_API_TOKEN`) — never hard-code or commit it.
 
-### 4. Map extraction *(todo)*
+### 5. Table & map recovery, and the demo *(todo)*
 
-The PDF carries maps as part of the scanned page images (no vector data). Plan:
-detect map regions on the relevant scan pages and render them to linked image
-files, associated with the place(s) they illustrate via page provenance.
+- **Tables** — per Humphrey Southall, many embedded statistical tables were omitted in
+  transcription (Vol 5 keeps 140). Recover them from the scanned PDF using each place's
+  `page_start`/`page_end` → detect table regions → OCR/crop into the `place` record.
+- **Maps** — carried as part of the scanned page images (no vector data); detect map regions
+  on the relevant scans and render to linked image files.
+- **MapLibre demo** — a static GitHub Pages UI (`docs/`, live at
+  [docuracy.github.io/GOTW](https://docuracy.github.io/GOTW/)) plotting ~100 reconciled
+  places to showcase the pipeline end-to-end.
 
-### 5. MapLibre demo — GitHub Pages *(todo)*
-
-A static demo UI (MapLibre GL) hosted on GitHub Pages, plotting a sample of
-~100 extracted places geolocated via the WHG Reconciliation API — to showcase
-the pipeline end-to-end.
+---
 
 ## Credits
 
-- **Prof. Humphrey Southall** — University of Portsmouth; Director, Great Britain
-  Historical GIS. Oversaw the OCR transcription of the seven volumes that this
-  project builds upon.
-- **World Historical Gazetteer** (University of Pittsburgh; Dir. Prof. Ruth
-  Mostern) — reconciliation indices and authority-gazetteer framework.
+- **Prof. Humphrey Southall** — University of Portsmouth; Director, Great Britain Historical
+  GIS. Oversaw the OCR transcription of the seven volumes this project builds upon.
+- **World Historical Gazetteer** (University of Pittsburgh; Dir. Prof. Ruth Mostern) —
+  reconciliation indices and the authority-gazetteer framework.
+- Place types use the Getty **Art & Architecture Thesaurus** (AAT), made available under the
+  [ODC Attribution License](https://www.getty.edu/research/tools/vocabularies/license.html).
