@@ -1,0 +1,463 @@
+{
+  "concepts": [
+    {
+      "aat_id": "300008347",
+      "label": "inhabited places",
+      "fclass": "P",
+      "gazetteer_terms": [
+        "settlement",
+        "place",
+        "(generic populated place)"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008347"
+    },
+    {
+      "aat_id": "300008375",
+      "label": "towns",
+      "fclass": "P",
+      "gazetteer_terms": [
+        "town",
+        "market-town",
+        "walled town",
+        "fortified town"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008375"
+    },
+    {
+      "aat_id": "300008372",
+      "label": "villages",
+      "fclass": "P",
+      "gazetteer_terms": [
+        "village"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008372"
+    },
+    {
+      "aat_id": "300008369",
+      "label": "hamlets",
+      "fclass": "P",
+      "gazetteer_terms": [
+        "hamlet"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008369"
+    },
+    {
+      "aat_id": "300008389",
+      "label": "cities",
+      "fclass": "P",
+      "gazetteer_terms": [
+        "city"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008389"
+    },
+    {
+      "aat_id": "300008423",
+      "label": "market towns",
+      "fclass": "P",
+      "gazetteer_terms": [
+        "market town"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008423"
+    },
+    {
+      "aat_id": "300387218",
+      "label": "capitals (seats of government)",
+      "fclass": "P",
+      "gazetteer_terms": [
+        "capital",
+        "seat of government"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300387218"
+    },
+    {
+      "aat_id": "300120599",
+      "label": "ports (settlements)",
+      "fclass": "P",
+      "gazetteer_terms": [
+        "port",
+        "seaport",
+        "harbour (as a port town)"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300120599",
+      "review": "harbour is usually an attribute of a port town, not a standalone place."
+    },
+    {
+      "aat_id": "300236157",
+      "label": "political divisions",
+      "fclass": "A",
+      "gazetteer_terms": [
+        "(generic admin division)",
+        "circle",
+        "partido",
+        "government (guberniya)",
+        "intendency",
+        "comarca",
+        "bailiwick",
+        "division",
+        "territory"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300236157"
+    },
+    {
+      "aat_id": "300000773",
+      "label": "parishes (religious divisions)",
+      "fclass": "A",
+      "gazetteer_terms": [
+        "parish",
+        "chapelry"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300000773",
+      "review": "AAT only has 'parishes (religious divisions)'; gazetteer parishes are often civil/territorial. Acceptable, flag if precision matters."
+    },
+    {
+      "aat_id": "300000792",
+      "label": "townships",
+      "fclass": "A",
+      "gazetteer_terms": [
+        "township"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300000792"
+    },
+    {
+      "aat_id": "300387330",
+      "label": "communes (administrative)",
+      "fclass": "A",
+      "gazetteer_terms": [
+        "commune"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300387330"
+    },
+    {
+      "aat_id": "300000769",
+      "label": "cantons (administrative bodies)",
+      "fclass": "A",
+      "gazetteer_terms": [
+        "canton"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300000769"
+    },
+    {
+      "aat_id": "300000705",
+      "label": "districts",
+      "fclass": "A",
+      "gazetteer_terms": [
+        "district"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300000705"
+    },
+    {
+      "aat_id": "300000772",
+      "label": "departments (political divisions)",
+      "fclass": "A",
+      "gazetteer_terms": [
+        "department"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300000772"
+    },
+    {
+      "aat_id": "300000771",
+      "label": "counties",
+      "fclass": "A",
+      "gazetteer_terms": [
+        "county"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300000771"
+    },
+    {
+      "aat_id": "300000774",
+      "label": "provinces",
+      "fclass": "A",
+      "gazetteer_terms": [
+        "province"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300000774"
+    },
+    {
+      "aat_id": "300000759",
+      "label": "arrondissements (districts)",
+      "fclass": "A",
+      "gazetteer_terms": [
+        "arrondissement"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300000759"
+    },
+    {
+      "aat_id": "300000778",
+      "label": "boroughs",
+      "fclass": "A",
+      "gazetteer_terms": [
+        "borough"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300000778"
+    },
+    {
+      "aat_id": "300000776",
+      "label": "states (political divisions)",
+      "fclass": "A",
+      "gazetteer_terms": [
+        "state (political division)"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300000776"
+    },
+    {
+      "aat_id": "300232420",
+      "label": "sovereign states",
+      "fclass": "A",
+      "gazetteer_terms": [
+        "state",
+        "kingdom",
+        "empire",
+        "principality (as polity)"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300232420"
+    },
+    {
+      "aat_id": "300387506",
+      "label": "countries (sovereign states)",
+      "fclass": "A",
+      "gazetteer_terms": [
+        "country"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300387506"
+    },
+    {
+      "aat_id": "300008707",
+      "label": "rivers",
+      "fclass": "H",
+      "gazetteer_terms": [
+        "river"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008707"
+    },
+    {
+      "aat_id": "300008699",
+      "label": "streams",
+      "fclass": "H",
+      "gazetteer_terms": [
+        "rivulet",
+        "stream",
+        "brook"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008699"
+    },
+    {
+      "aat_id": "300008680",
+      "label": "lakes (bodies of water)",
+      "fclass": "H",
+      "gazetteer_terms": [
+        "lake"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008680"
+    },
+    {
+      "aat_id": "300132316",
+      "label": "bays (bodies of water)",
+      "fclass": "H",
+      "gazetteer_terms": [
+        "bay"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300132316"
+    },
+    {
+      "aat_id": "300132315",
+      "label": "gulfs (bodies of water)",
+      "fclass": "H",
+      "gazetteer_terms": [
+        "gulf"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300132315"
+    },
+    {
+      "aat_id": "300266559",
+      "label": "straits",
+      "fclass": "H",
+      "gazetteer_terms": [
+        "strait"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300266559"
+    },
+    {
+      "aat_id": "300008706",
+      "label": "creeks (bodies of water)",
+      "fclass": "H",
+      "gazetteer_terms": [
+        "creek"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008706"
+    },
+    {
+      "aat_id": "300185707",
+      "label": "inlets",
+      "fclass": "H",
+      "gazetteer_terms": [
+        "inlet",
+        "indentation"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300185707"
+    },
+    {
+      "aat_id": "300008713",
+      "label": "channels (water bodies)",
+      "fclass": "H",
+      "gazetteer_terms": [
+        "channel"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008713"
+    },
+    {
+      "aat_id": "300008791",
+      "label": "islands (landforms)",
+      "fclass": "T",
+      "gazetteer_terms": [
+        "island"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008791"
+    },
+    {
+      "aat_id": "300386852",
+      "label": "islets",
+      "fclass": "T",
+      "gazetteer_terms": [
+        "islet"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300386852"
+    },
+    {
+      "aat_id": "300386854",
+      "label": "archipelagos",
+      "fclass": "T",
+      "gazetteer_terms": [
+        "group",
+        "cluster",
+        "archipelago"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300386854"
+    },
+    {
+      "aat_id": "300008850",
+      "label": "capes (landforms)",
+      "fclass": "T",
+      "gazetteer_terms": [
+        "cape",
+        "headland",
+        "point"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008850",
+      "review": "no AAT 'points (coastal landforms)'; folded into capes/headlands."
+    },
+    {
+      "aat_id": "300008853",
+      "label": "promontories",
+      "fclass": "T",
+      "gazetteer_terms": [
+        "promontory"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008853"
+    },
+    {
+      "aat_id": "300008804",
+      "label": "peninsulas",
+      "fclass": "T",
+      "gazetteer_terms": [
+        "peninsula"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008804"
+    },
+    {
+      "aat_id": "300008795",
+      "label": "mountains (landforms)",
+      "fclass": "T",
+      "gazetteer_terms": [
+        "mountain"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008795"
+    },
+    {
+      "aat_id": "300008777",
+      "label": "hills (landforms)",
+      "fclass": "T",
+      "gazetteer_terms": [
+        "hill"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008777"
+    },
+    {
+      "aat_id": "300008798",
+      "label": "peaks (landforms)",
+      "fclass": "T",
+      "gazetteer_terms": [
+        "summit",
+        "peak"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008798"
+    },
+    {
+      "aat_id": "300386831",
+      "label": "mountain ranges",
+      "fclass": "T",
+      "gazetteer_terms": [
+        "range",
+        "chain",
+        "mountain range"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300386831"
+    },
+    {
+      "aat_id": "300008761",
+      "label": "valleys (landforms)",
+      "fclass": "T",
+      "gazetteer_terms": [
+        "valley"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008761"
+    },
+    {
+      "aat_id": "300132325",
+      "label": "volcanoes",
+      "fclass": "T",
+      "gazetteer_terms": [
+        "volcano"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300132325"
+    },
+    {
+      "aat_id": "300008805",
+      "label": "plains (landforms)",
+      "fclass": "T",
+      "gazetteer_terms": [
+        "plain"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300008805"
+    },
+    {
+      "aat_id": "300006894",
+      "label": "fortresses",
+      "fclass": "S",
+      "gazetteer_terms": [
+        "fortress"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300006894"
+    },
+    {
+      "aat_id": "300006909",
+      "label": "forts",
+      "fclass": "S",
+      "gazetteer_terms": [
+        "fort"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300006909"
+    },
+    {
+      "aat_id": "300191997",
+      "label": "ethnic groups",
+      "fclass": "X",
+      "gazetteer_terms": [
+        "tribe",
+        "people",
+        "ethnic group"
+      ],
+      "uri": "http://vocab.getty.edu/aat/300191997",
+      "review": "an Agent, not a geographic place; peoples/tribes may be excluded from the gazetteer or modelled separately."
+    }
+  ]
+}

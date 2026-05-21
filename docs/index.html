@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gazetteer of the World → Linked Data</title>
+  <style>
+    :root { --ink:#1a2438; --sea:#2a6f97; --paper:#f7f4ec; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:16px/1.6 Georgia, "Times New Roman", serif;
+           color:var(--ink); background:var(--paper); }
+    header { padding:3rem 1.5rem 2rem; max-width:760px; margin:0 auto; }
+    h1 { font-size:2rem; margin:0 0 .3rem; }
+    .sub { color:var(--sea); font-style:italic; margin:0 0 1.5rem; }
+    main { max-width:760px; margin:0 auto; padding:0 1.5rem 4rem; }
+    h2 { font-size:1.15rem; border-bottom:1px solid #d8d2c4; padding-bottom:.3rem; }
+    code { background:#ece7da; padding:.1em .35em; border-radius:3px; font-size:.9em; }
+    a { color:var(--sea); }
+    .status { display:inline-block; background:#e7eef3; color:var(--sea);
+              border:1px solid #b9d2e0; border-radius:999px; padding:.15rem .7rem;
+              font:600 .75rem/1.4 system-ui, sans-serif; letter-spacing:.03em; }
+    footer { max-width:760px; margin:0 auto; padding:2rem 1.5rem; color:#6b6452;
+             font-size:.85rem; border-top:1px solid #d8d2c4; }
+    #map { height:0; } /* reserved for the MapLibre demo */
+  </style>
+</head>
+<body>
+  <header>
+    <p class="status">work in progress</p>
+    <h1>A Gazetteer of the World → Linked Data</h1>
+    <p class="sub">Transforming a 19th-century gazetteer into a structured authority
+      gazetteer for the World Historical Gazetteer.</p>
+  </header>
+  <main>
+    <p>This project parses the OCR'd transcripts of
+      <a href="https://archive.org/details/agazetteerworld00unkngoog"><em>A Gazetteer
+      of the World</em></a> (c.&nbsp;1856) into structured, AAT-typed place records,
+      geolocated against the
+      <a href="https://whgazetteer.org/">World Historical Gazetteer</a> via its
+      Reconciliation API.</p>
+
+    <h2>Coming here</h2>
+    <p>An interactive <strong>MapLibre</strong> demo plotting a sample of extracted
+      places, geolocated through the WHG Reconciliation API.</p>
+    <div id="map"></div>
+
+    <h2>Pipeline status</h2>
+    <ul>
+      <li>✓ HTML parsed to a structured store (entries, cross-refs, tables, page provenance)</li>
+      <li>✓ Toponyms normalised from UPPERCASE to title case</li>
+      <li>✓ Getty AAT feature-type shortlist drafted and validated</li>
+      <li>… LLM extraction of places + disambiguation context</li>
+      <li>… WHG reconciliation, table recovery, and map extraction from the page scans</li>
+    </ul>
+
+    <p>Source code and method: <a href="https://github.com/docuracy/GOTW">github.com/docuracy/GOTW</a>.</p>
+  </main>
+  <footer>
+    Built on OCR transcription overseen by Prof.&nbsp;Humphrey Southall (University of
+    Portsmouth; GB Historical GIS). Reconciliation indices courtesy of the World
+    Historical Gazetteer (University of Pittsburgh).
+  </footer>
+</body>
+</html>
