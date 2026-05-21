@@ -110,11 +110,23 @@ id** against the AAT index, so a wrong/stale id fails loudly rather than silentl
 ### 3. LLM extraction → `place` — `process/extract.py` *(done)*
 
 ```bash
-python3 process/extract.py --dry-run --limit 1   # inspect prompt + schema + a request (no API key)
-python3 process/extract.py --limit 20            # sync-process 20 pending entries
-python3 process/extract.py --batch               # submit all pending entries to the Batch API
-python3 process/extract.py --collect <batch_id>  # write results once the batch ends
+python3 process/extract.py --dry-run --limit 1                  # prompt + schema + a request (no key)
+python3 process/extract.py --provider gemini --limit 20         # sync (Flash-Lite/Flash)
+python3 process/extract.py --provider claude --limit 20         # sync (Haiku/Sonnet)
+python3 process/extract.py --provider claude --batch            # full corpus via the Batch API
+python3 process/extract.py --provider claude --collect <id>     # write results once the batch ends
 ```
+
+**Provider-pluggable for a cost/quality A/B.** A thin provider interface backs two implementations —
+`claude` (Haiku→short / Sonnet→long) and `gemini` (Flash-Lite→short / Flash→long) — selectable with
+`--provider`, with `--model NAME` to force one model for every entry. Keys come from `.env`
+(`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`).
+
+**Every successful result is cached** in an `llm_cache` table, keyed by `(provider, model,
+prompt+schema signature, entry text)`. Re-runs, re-collects, and switching back to a model you've
+already used cost **zero** API calls — essential for running the A/B without burning quota. Editing
+the prompt or schema changes the signature and so re-extracts deliberately. (Verified live: a 2-entry
+Haiku run made 2 calls; the immediate re-run made 0 and served both from cache.)
 
 Each entry yields one **structured record per place** (Pydantic-validated against a JSON
 schema): canonical name + variants, the feature type as a **Getty AAT id** (a closed enum —
