@@ -1,28 +1,30 @@
 #!/usr/bin/env python3
-"""Recover/verify statistical tables from the Volume 5 PDF by vision-LLM.
+"""Digitise statistical tables from the volume scans by vision-LLM, into table_data.
 
-Southall's HTML transcription dropped many embedded tables; now that gotw-v5.pdf
-tallies with the transcript (and process/pdf_pages maps printed page → PDF index,
-handling plate drift), we can digitise any table straight from the scan. Given a
-printed page number, this renders the page and extracts every statistical table as
-structured {title, header, rows}, storing them in table_data (source='pdf'). Cached.
+Surya's layout model does NOT detect these 1856 tables (no ruling lines), so we can't
+route them out by layout — and plain OCR linearises their cells into scrambled text. The
+robust answer is a **vision-LLM**, which both *finds* and *structures* each table from the
+page image. To bound cost we don't call it on every page: we score each OCR'd page by
+**digit density** (tables leave many number-heavy lines even when linearised) and send only
+the candidates. Each table is stored as {subject(title), header, rows} in table_data
+(source='vision'), keyed by volume + printed page. Cached per image, idempotent per page.
 
-    python3 process/extract_tables.py --page 32         # Madras Presidency table
-    python3 process/extract_tables.py --page 14 --dry-run
+    # corpus path: detect candidates from the merged OCR text, digitise from the page images
+    python3 process/extract_tables.py --img-dir /vast/ishi/gotw/img/v5 --ocr data/txt/gotw-v5-ocr.txt --volume v5
+    python3 process/extract_tables.py --img-dir /vast/ishi/gotw/img/v5 --ocr data/txt/gotw-v5-ocr.txt --volume v5 --list-candidates
+    # single page from a PDF (spot check / no OCR text yet)
+    python3 process/extract_tables.py --pdf data/pdf/gotw-v5.pdf --page 32 --volume v5
 """
 from __future__ import annotations
-import argparse, hashlib, importlib.util, json, socket, sqlite3, time, urllib.request
+import argparse, hashlib, importlib.util, json, re, socket, sqlite3, time, urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 from pydantic import BaseModel
-import fitz
-
-pp = importlib.util.module_from_spec(
-    importlib.util.spec_from_file_location("pp", Path(__file__).with_name("pdf_pages.py")))
-pp.__spec__.loader.exec_module(pp)
 
 MODEL = "gemini-2.5-flash"
+IMG_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
+HEAD = re.compile(r"^## p\. (\S+) \(#(\d+)\)")
 
 
 class Table(BaseModel):
@@ -67,6 +69,7 @@ def _dns():
 
 
 def extract(jpeg, con):
+    """Vision-LLM a single page image (jpeg bytes) -> TableSet. Cached by image hash."""
     global _GENAI
     key = hashlib.sha256(f"table\0{MODEL}\0{SIG}\0{hashlib.sha256(jpeg).hexdigest()}".encode()).hexdigest()
     row = con.execute("SELECT response_json FROM llm_cache WHERE key=?", (key,)).fetchone()
@@ -96,35 +99,131 @@ def extract(jpeg, con):
             time.sleep(2 ** attempt)
 
 
+# ── candidate detection ──────────────────────────────────────────────────────
+def run_score(text: str) -> int:
+    """Longest run of consecutive number-heavy lines = table rows.
+
+    Page-level digit density fails here (the gazetteer is number-dense everywhere), but in
+    our *column-ordered* OCR a table's rows stay consecutive, so a run of number-heavy lines
+    is a strong, specific signal: prose tops out ~2, tables run 6-9 (validated on v1 — e.g.
+    BARBADOS p.574 climate+trade tables scored 9). Needs column-aware OCR; it does NOT work
+    on cross-column-scrambled text layers."""
+    run = best = 0
+    for l in text.splitlines():
+        if l.startswith("##") or l.startswith("<!--"):
+            continue
+        toks = l.split()
+        num_toks = sum(1 for t in toks if sum(c.isdigit() for c in t) >= 2)
+        if num_toks >= 2 and len(toks) >= 2:
+            run += 1; best = max(best, run)
+        else:
+            run = 0
+    return best
+
+
+def parse_ocr(path: str):
+    """Yield (printed_page|None, image_index, text) per page from a merged OCR .txt."""
+    for chunk in Path(path).read_text(encoding="utf-8").split("\f"):
+        m = HEAD.search(chunk)
+        if not m:
+            continue
+        page = int(m.group(1)) if m.group(1).isdigit() else None
+        yield page, int(m.group(2)) - 1, chunk
+
+
+# ── storage ──────────────────────────────────────────────────────────────────
+def ensure_schema(con):
+    cols = {r[1] for r in con.execute("PRAGMA table_info(table_data)")}
+    if "volume" not in cols:
+        con.execute("ALTER TABLE table_data ADD COLUMN volume TEXT")
+    if "source" not in cols:
+        con.execute("ALTER TABLE table_data ADD COLUMN source TEXT DEFAULT 'html'")
+    con.commit()
+
+
+def store(con, ts, *, volume, page, headword=None, entry_id=None):
+    """Replace any prior vision tables for this (volume, page), then insert the new set."""
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    con.execute("DELETE FROM table_data WHERE source='vision' AND volume=? AND page_start IS ?", (volume, page))
+    for i, t in enumerate(ts.tables, 1):
+        con.execute("INSERT INTO table_data(entry_id,table_no,headword,page_start,n_rows,n_cols,subject,"
+                    "header,rows,created_at,volume,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,'vision')",
+                    (entry_id, i, headword, page, len(t.rows), len(t.header), t.title,
+                     json.dumps(t.header, ensure_ascii=False), json.dumps(t.rows, ensure_ascii=False), now, volume))
+    con.commit()
+
+
+def show(ts):
+    print(f"  -> {len(ts.tables)} table(s)")
+    for t in ts.tables:
+        print(f"     title: {t.title} | header: {t.header} | {len(t.rows)} rows")
+        for r in t.rows[:3]:
+            print(f"       {r}")
+
+
+# ── main ─────────────────────────────────────────────────────────────────────
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pdf", default="data/pdf/gotw-v5.pdf")
     ap.add_argument("--db", default="data/gotw.sqlite")
-    ap.add_argument("--page", type=int, required=True, help="printed page number")
+    ap.add_argument("--volume", required=True, help="volume tag, e.g. v5")
+    ap.add_argument("--img-dir", dest="img_dir", help="page-image directory (corpus path)")
+    ap.add_argument("--ocr", help="merged OCR .txt for candidate detection (with --img-dir)")
+    ap.add_argument("--pdf", help="PDF source for single-page --page mode")
+    ap.add_argument("--page", type=int, help="single printed page (uses --pdf)")
+    ap.add_argument("--thresh", type=int, default=5, help="min consecutive number-row run to flag a table page")
+    ap.add_argument("--limit", type=int, help="cap candidates (testing)")
+    ap.add_argument("--list-candidates", action="store_true", help="print candidates + scores, no API")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     con = sqlite3.connect(args.db)
     con.executescript("CREATE TABLE IF NOT EXISTS llm_cache (key TEXT PRIMARY KEY, provider TEXT, model TEXT,"
                       " entry_id INTEGER, response_json TEXT, usage_json TEXT, created_at TEXT);")
-    idx = pp.page_index(args.pdf).get(args.page)
-    if idx is None:
-        print(f"printed page {args.page} not found in index"); return
-    d = fitz.open(args.pdf)
-    jpeg = d[idx].get_pixmap(matrix=fitz.Matrix(3.0, 3.0)).tobytes("jpeg")
-    print(f"printed p.{args.page} -> PDF idx {idx} ({len(jpeg):,} byte image)")
-    if args.dry_run:
-        print("(dry run: no API)"); return
-    ts = extract(jpeg, con)
-    if not ts:
+    ensure_schema(con)
+
+    # ── single page from a PDF ──
+    if args.page is not None:
+        import fitz
+        pp = importlib.util.module_from_spec(
+            importlib.util.spec_from_file_location("pp", Path(__file__).with_name("pdf_pages.py")))
+        pp.__spec__.loader.exec_module(pp)
+        idx = pp.page_index(args.pdf).get(args.page)
+        if idx is None:
+            print(f"printed page {args.page} not found in index"); return
+        jpeg = fitz.open(args.pdf)[idx].get_pixmap(matrix=fitz.Matrix(3.0, 3.0)).tobytes("jpeg")
+        print(f"printed p.{args.page} -> PDF idx {idx} ({len(jpeg):,} byte image)")
+        if args.dry_run:
+            print("(dry run)"); return
+        ts = extract(jpeg, con)
+        if ts:
+            store(con, ts, volume=args.volume, page=args.page); show(ts)
         return
-    print(f"extracted {len(ts.tables)} table(s):")
-    for t in ts.tables:
-        print(f"\n  title: {t.title}")
-        print(f"  header: {t.header}")
-        for r in t.rows[:5]:
-            print(f"  row:   {r}")
-        if len(t.rows) > 5:
-            print(f"  … {len(t.rows)-5} more rows ({len(t.rows)} total)")
+
+    # ── corpus: candidates from OCR text, images from --img-dir ──
+    if not args.img_dir or not args.ocr:
+        ap.error("corpus mode needs --img-dir and --ocr (or use --page with --pdf)")
+    files = sorted(p for p in Path(args.img_dir).iterdir() if p.suffix.lower() in IMG_EXTS)
+    cands = [(p, i, run_score(t)) for p, i, t in parse_ocr(args.ocr)]
+    cands = [(p, i, s) for p, i, s in cands if s >= args.thresh]
+    cands.sort(key=lambda x: -x[2])
+    if args.limit:
+        cands = cands[:args.limit]
+    print(f"{len(cands)} candidate table pages (thresh {args.thresh}) of {len(files)} images")
+    if args.list_candidates:
+        for p, i, s in sorted(cands, key=lambda x: x[1]):
+            print(f"  p.{p} (img #{i}): score {s:.2f}")
+        return
+    if args.dry_run:
+        return
+    n_tables = 0
+    for p, i, s in sorted(cands, key=lambda x: x[1]):
+        if i >= len(files):
+            print(f"  p.{p}: image #{i} out of range, skip"); continue
+        ts = extract(files[i].read_bytes(), con)
+        if ts:
+            store(con, ts, volume=args.volume, page=p)
+            n_tables += len(ts.tables)
+            print(f"  p.{p} (img #{i}, score {s:.2f}): {len(ts.tables)} table(s)", flush=True)
+    print(f"\nstored {n_tables} tables from {len(cands)} candidate pages into table_data (volume {args.volume})")
 
 
 if __name__ == "__main__":

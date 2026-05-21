@@ -14,10 +14,11 @@ Knowledge* (Edinburgh: A. Fullarton & Co., 1856), 7 vols. The work was published
 author**.
 [archive.org/details/agazetteerworld00unkngoog](https://archive.org/details/agazetteerworld00unkngoog).
 
-> **Two different volumes are in play.** The OCR transcript we parse is **Volume V**; the scanned PDF
-> in `data/pdf/` is **Volume VII (TA–ZZUBIN, with Appendix)**. They are different volumes of the same
-> work — so the HTML's page numbers do **not** index the held PDF (see [table/map recovery](#5-tables-maps-and-the-demo)).
-> Volume VII's Appendix, however, is itself a prize: a bidirectional ancient↔modern toponym
+> **We OCR the public-domain scans ourselves.** Rather than reuse a third-party transcript, we run
+> the **1856 first-edition page images (HathiTrust vols 1–7)** through a modern layout-aware OCR model
+> ([Surya](https://github.com/datalab-to/surya)) on a GPU cluster — fully public-domain, no licence
+> encumbrance, and cleaner than the 2015 OCR it replaces (see [the OCR stage](#1-ocr-the-scans--processocr_pagespy)).
+> Volume VII's **Appendix** is a prize in its own right: a bidirectional ancient↔modern toponym
 > concordance — see [the Appendix concordance](#6-volume-vii-appendix--toponym-authority).
 
 ---
@@ -29,74 +30,117 @@ lesson at each step:
 
 | Stage | What you do | Transferable lesson |
 |------|-------------|---------------------|
-| **0. Get text** | Obtain (or OCR) a text transcript of the PDF. | OCR is rarely clean; plan to correct it, ideally *inside* a step you're already paying for. |
-| **1. Parse to records** | Split the flow into one row per source record, keeping **provenance** (page, raw markup). | Parse defensively: the obvious delimiter (here, `<p>`) lies — page breaks fall mid-record, cross-references and continuations masquerade as entries. Validate against spot-checks, not assumptions. |
+| **0. Get text** | OCR the page scans yourself with a **layout-aware** model. | Don't inherit someone else's OCR (licence + quality risk). Modern OCR (Surya) reads diacritics and coordinates cleanly; let it segment tables/figures, but reconstruct multi-column reading order from line geometry — layout models treat a dense column body as one block. |
+| **1. Parse to records** | Split the flow into one row per source record, keeping **provenance** (page, raw markup). | Parse defensively: the obvious delimiter lies — page breaks fall mid-record, cross-references and continuations masquerade as entries. Validate against spot-checks, not assumptions. |
 | **2. Model the target** | Decide your unit of interest and a controlled vocabulary for typing it. | Mine the *actual* data for its categories before choosing vocabulary terms; resolve them to real authority IDs (here Getty AAT) and **validate every ID** so a typo fails loudly. |
 | **3. LLM extraction** | Send each record to an LLM for structured output: the entity, its type, and the **context needed to disambiguate** it. | Use schema-constrained (structured) output, cache the shared prompt prefix, route by length to control cost, and **estimate cost up front** from a real sample. Fold OCR correction into this same pass. |
 | **4. Reconcile / geolocate** | Match each place against a gazetteer service to attach coordinates and identifiers. | Disambiguation context (containing region, neighbours, coordinates) is what makes reconciliation accurate — extract it deliberately in step 3. |
 | **5. Publish** | Export linked data; show it. | A small interactive demo (here MapLibre on GitHub Pages) communicates the result better than a data dump. |
 
-Everything here runs on the Python standard library plus `beautifulsoup4`, `lxml`,
-`tiktoken`, `pymupdf`, `anthropic`, and `pydantic` (see [Setup](#setup)).
+Everything here runs on the Python standard library plus `surya-ocr`, `pymupdf`,
+`beautifulsoup4`, `lxml`, `tiktoken`, `anthropic`, and `pydantic` (see [Setup](#setup)).
+OCR runs on a GPU (we use the Pitt CRC cluster); the rest runs anywhere.
 
 ---
 
 ## This project's pipeline
 
 ```
-HTML transcript ──parse──▶ entry ──OCR-correct──▶ entry.text_corrected ──LLM extract──▶ place
-   (Humphrey, Vol V)                  ▲                                                    │
-                          Hathi .txt + toponym dict                  AAT typing · multi-place split ·
-                          (cleaner chars, authority)                 cross-ref · ethnography · context
-                                                                                          │
-                                                       WHG Reconciliation API ──▶ coordinates ──▶ MapLibre demo
+PD scans ──Surya OCR──▶ volume .txt ──parse──▶ entry ──toponym-check──▶ entry.text_corrected ──LLM extract──▶ place
+ (vols 1–7)  (GPU/CRC)   (## p. N)                  ▲                                                       │
+                                            dict/toponyms.json                  AAT typing · multi-place split ·
+                                            (authority + Surya cross-check)      cross-ref · ethnography · context
+                                                                                                           │
+                                                              WHG Reconciliation API ──▶ coordinates ──▶ MapLibre demo
 
 v7 Appendix ──vision-LLM──▶ name_variant ──▶ dict/toponyms.json   (ancient↔modern toponym authority)
 ```
 
 | Asset | Notes |
 |-------|-------|
-| `data/pdf/gotw-v{1,5,7}.pdf` | Per-volume scans (Vol I `AAR…BRA`, Vol V `LUS…PERTHSHIRE`, Vol VII `TA…ZZUBIN`+Appendix), built from HathiTrust images+OCR by `build_pdf.py`. Git-ignored; rebuild from source. |
-| `data/html/…html` | OCR transcript of **Volume V** by **Prof. Humphrey Southall** — the *structural* base (clean entry/paragraph segmentation), corrected against the Hathi OCR. |
-| `data/jpeg/`, `data/txt/` | HathiTrust per-volume downloads (600dpi image zips + OCR text). Transient — consumed and deleted by `build_pdf.py`. Git-ignored. |
+| `data/pdf/gotw-v{1..7}.pdf` | Per-volume public-domain scans, built from HathiTrust 600dpi images by `build_pdf.py`. The OCR input. Git-ignored; rebuild from source. |
+| `data/txt/ocr/v{N}/p*.txt`, `data/txt/gotw-v{N}-ocr.txt` | Our **Surya OCR** output — one resumable file per page, merged per volume (`## p. N` markers). Produced by `ocr_pages.py`. Git-ignored. |
 | `data/gotw.sqlite` | Working store (entry, place, table_data, name_variant, corrections, llm_cache…). Git-ignored; rebuild from source. |
 | `data/aat_shortlist.json` | 47 validated Getty AAT feature-type concepts (committed). |
 | `dict/toponyms.json` | 27,528-toponym authority built from the Vol VII Appendix (committed). |
 
-Source work: the **Royal Geographical Society** (1856); transcription by **Prof. Humphrey Southall** — see [Credits](#credits).
+Source work: the **Royal Geographical Society** (1856), public domain — see [Credits](#credits).
 
 ### Setup
 
 ```bash
 pip install anthropic google-genai beautifulsoup4 lxml tiktoken pymupdf pydantic requests
+pip install surya-ocr          # OCR stage only; needs a CUDA GPU (we run it on the Pitt CRC cluster)
 # Secrets go in .env (git-ignored): WHG_API_TOKEN, ANTHROPIC_API_KEY, GEMINI_API_KEY
-# OCR correction reads a word list from dict/words or /usr/share/dict/words
+# The toponym cross-check reads a word list from dict/words or /usr/share/dict/words
 ```
 
-### 1. Parse — `process/parse_html.py`
+### 1. OCR the scans — `process/ocr_pages.py`
 ```bash
-python3 process/parse_html.py data/html/gotw_vol5_all_web_v1.html --db data/gotw.sqlite
+# one page to stdout (quick check — needs a CUDA GPU)
+python3 process/ocr_pages.py --pdf data/pdf/gotw-v5.pdf --start 84 --end 84
+# shard a volume into resumable per-page files, then stitch into one volume .txt
+python3 process/ocr_pages.py --pdf data/pdf/gotw-v5.pdf --out-dir data/txt/ocr/v5 --start 0 --end 199
+python3 process/ocr_pages.py --pdf data/pdf/gotw-v5.pdf --out-dir data/txt/ocr/v5 --merge --out data/txt/gotw-v5-ocr.txt
 ```
 
-The transcript is one long flow of `<p>` elements. The parser handles what breaks
-naive splitting:
+We OCR the public-domain scans ourselves with **[Surya](https://github.com/datalab-to/surya)**, a
+modern layout-aware OCR model. It reads this 1856 print far better than the 2015 transcript or
+Tesseract: validated on a CRC L40S GPU it returns clean diacritics (*São-Pedro*, *Maranhão*), intact
+coordinate glyphs (*S lat. 37° 10′*), and correct two-column reading order, at **~4 s/page** (0.4 s
+layout + 3.5 s detect+recognise).
 
-- **Page markers `[[N]]`** sit inside `<br/>` runs and can fall *mid-paragraph*, gluing
-  the tail of one place onto a new headword. We split on them and record page provenance
-  (`page_start`/`page_end`) — essential for going back to the PDF later.
-- **Continuation paragraphs** (overflow prose, `<em>Climate</em>.]` / `History.]` section
-  headers) are merged back into the place they describe.
-- **Cross-references** (`Luttich. See Liege.`) are classified as `kind='crossref'` with
-  the target in `see_target`.
-- **Statistical tables** are attached to their place (`n_tables`) — see [table recovery](#5-tables-maps-and-the-demo).
-- **Toponym case** — headwords are printed UPPERCASE; `headword_disp` holds a title-cased
-  form (`LUS-LA-CROIX-HAUTE` → `Lus-la-Croix-Haute`) with multilingual particles
-  (`de`, `la`, `von`, `of`, …) lower-cased.
+What generalises:
+- **Layout segmentation has limits.** Surya's `LayoutPredictor` reliably finds **tables and figures**
+  — we route those to [`extract_tables.py`](#5-tables-maps-and-the-demo)/`extract_maps.py` and exclude
+  them from the prose — but it treats the dense two-column body as a *single* text block; it will
+  **not** split the columns. So we reconstruct **two-column reading order from the recognised line-box
+  geometry** (left column top-to-bottom, then right). The page marker (`## p. N`) is read from the
+  running-head number in the top margin.
+- **Resumable + shardable.** One file per page (`p<idx>.txt`, written atomically); a page already on
+  disk is skipped, so a re-run only fills gaps. `--merge` stitches a volume into one `## p. N`-marked
+  `.txt` for the parser — the same format the downstream steps already understand.
+- **Cluster submitter** — `process/submit_ocr_slurm.py` shards a volume across the Pitt CRC **GPU
+  cluster** as a SLURM array (`--clusters=gpu --partition=l40s --gres=gpu:1`, conda `whg`, models +
+  scans on fast `/vast/ishi`). At ~4 s/page the ~6,600-page corpus is ~7 h on one GPU, minutes across
+  the array; `--partition preempt` taps the large pre-emptible pool for free since OCR resumes.
 
-**Volume 5 result:** 12,477 entries · 730 cross-references · 140 tables · 1,128 multi-place
-entries (≈14,800 places once split) · pages 1–874.
+> **Why self-OCR (and no external transcript).** An earlier OCR transcript of these volumes exists, but
+> it is licensed **CC-BY-SA-NC** with an attribution/co-authorship requirement. To keep this gazetteer's
+> output **cleanly public-domain and unencumbered**, the project does **not** use that transcript or any
+> derivative of it — we OCR the public-domain 1856 page scans ourselves with Surya. Modern OCR is also
+> markedly better. *(The local 6 GB laptop GPU stalls Surya at init on torch 2.9/CUDA 12.8; the cluster
+> A100/L40S nodes run it fine.)*
 
-**Schema:** `source` (one row per HTML file) → `entry` (one row per headword block) →
+### 1b. Parse to entries — `process/parse_ocr.py`
+```bash
+python3 process/parse_ocr.py data/txt/gotw-v1-ocr.txt --volume v1 --db data/gotw.sqlite
+python3 process/parse_ocr.py data/txt/gotw-v1-ocr.txt --volume v1 --dry-run   # stats only
+```
+
+The OCR stream has **no markup** — entries are delimited only by the print convention, so the parser
+segments on the typographic signal and heals what OCR/line-wrapping break:
+
+- **Headword segmentation** — each entry opens with an **ALL-CAPS headword** then a descriptor
+  (`MALABAR, a district of …`); cross-references are `HEADWORD. See TARGET.`. We start a new entry on
+  any line matching that shape, with guards against false positives (initialisms like `A.M.`/`S.W.`,
+  bare running heads) — the boundary the markup used to give us for free.
+- **Prose flow & de-hyphenation** — wrapped lines are merged back into one text, healing end-of-line
+  hyphenation (`table-\nland` → `table-land`, `ot-\nters` → `otters`).
+- **Page provenance** — each page's `## p. N` marker (read by [OCR](#1-ocr-the-scans--processocr_pagespy)
+  from the running head) gives `page_start`/`page_end`, so every entry traces back to the scan.
+- **Cross-references** (`Aarafat. See Arafat.`) are classified `kind='crossref'` with the target in `see_target`.
+- **Toponym case** — headwords are printed UPPERCASE; `headword_disp` holds a title-cased form
+  (`LUS-LA-CROIX-HAUTE` → `Lus-la-Croix-Haute`) with multilingual particles (`de`, `la`, `von`, `of`, …) lower-cased.
+
+Statistical tables are **not** linearised into the prose — they are digitised separately by a vision-LLM
+(see [tables](#5-tables-maps-and-the-demo)). `parse_ocr.py` replaces the earlier `parse_html.py`, which
+parsed a third-party HTML transcript no longer used.
+
+**Volume I (our OCR):** 11,393 entries · 813 cross-references · ~1,426 multi-place entries (via `—Also`)
+· pages 3–896. The remaining volumes parse as their OCR completes.
+
+**Schema:** `source` (one row per volume) → `entry` (one row per headword block) →
 `place` (the unit of interest; populated by step 3). We use **SQLite, not DuckDB**, because
 the workload is write-heavy incremental updates as extraction and reconciliation complete;
 export to Parquet/DuckDB for analytics whenever you want.
@@ -110,29 +154,28 @@ export to Parquet/DuckDB for analytics whenever you want.
 > headers (handling the drift from unpaginated plates); `process/pdf_coverage.py` reports each PDF's
 > head-word range so you can confirm the seven tile A–Z without overlap or gap.
 
-### 1b. OCR correction — `process/correct_ocr.py`
+### 1c. Toponym cross-check — `process/correct_ocr.py`
 ```bash
-python3 process/build_toponym_dict.py                       # seed dict/toponyms.json from the v7 Appendix
-python3 process/correct_ocr.py --hathi data/txt/gotw-v5.txt # write entry.text_corrected + correction log
+python3 process/build_toponym_dict.py                        # build dict/toponyms.json from the v7 Appendix
+python3 process/correct_ocr.py --hathi data/txt/gotw-v5.txt  # apply the toponym authority (+ optional 2nd-OCR cross-check)
 ```
 
-The two OCR sources are complementary: **Humphrey's HTML has clean structure** (reflowed paragraphs,
-segmented entries) but `n↔u`/`o↔u` misreads; **HathiTrust's `.txt` reads characters better** but has
-two-column *layout* faults (merged columns, gutter `|`, scrambled order). So we keep Humphrey's
-structure and import only Hathi's better characters — deterministic, free, and fully logged.
+A single high-quality Surya pass removes the need for the heavy two-transcript diff-correction this step
+once did. What stays valuable is the **toponym authority** `dict/toponyms.json` — 27,528 place-name
+spellings from the [v7 Appendix](#6-volume-vii-appendix--toponym-authority) that a general dictionary
+can't supply. It restores accents and fixes place-name misreads (`Bastogue→Bastogne`, `Isere→Isère`)
+that even good OCR makes. `correct_ocr.py` applies it conservatively, and can fold in a **second,
+independent OCR** (e.g. the HathiTrust `.txt`) as a cross-check where available — anchoring on the
+headword, aligning word-tokens (`difflib`), and applying a swap only when safe:
+- a **known toponym wins** (via `dict/toponyms.json`); a name only one source spells correctly is restored;
+- **never numbers** (measurements/coordinates untouched), and a real word is never "corrected" into a non-word;
+- everything ambiguous (unknown proper nouns, `arc/are`) is **flagged, not applied** (`ocr_flags`), to be
+  settled by the corpus variant-tally or the extraction LLM.
 
-Per entry: clean the Hathi stream, anchor on the headword, align word-tokens (`difflib`), and decide
-each difference conservatively — **never numbers**; apply a swap only when it's safe:
-- a **known toponym** wins (via `dict/toponyms.json`): `Bastogue→Bastogne`, accent restored
-  `Isere→Isère`; and `Mirebeau` is *kept* (Hathi's `Mirebean` isn't a toponym);
-- a **Humphrey non-word → general-dictionary word**: `commnne→commune`, `tho→the`;
-- everything ambiguous (e.g. `arc/are`, unknown proper nouns) is **flagged, not applied** (`ocr_flags`),
-  to be settled by the corpus variant-tally or the extraction LLM.
-
-This avoided the naive-rule corruptions (`Mirebeau→Mirebean`, `ocean→occan`, `1½→14½`). v5: **2,364
-corrections applied** (1,572 word · 722 toponym · 70 diacritic), 3,196 flagged; written to
-`entry.text_corrected` with a per-change `reason` in `corrections`. Extraction reads the corrected
-text; the LLM's own OCR-correction remains a backstop.
+These guards came from real corruptions they prevent (`Mirebeau→Mirebean`, `ocean→occan`, `1½→14½`).
+Changes write to `entry.text_corrected` with a per-change `reason` in `corrections`; extraction reads the
+corrected text, with the LLM's own OCR-correction as a backstop. *(The cross-check needs a second OCR
+stream; with Surya alone, the toponym pass is the active path.)*
 
 ### 2. Feature-type vocabulary — `process/aat_resolve.py`, `process/build_aat_shortlist.py`
 ```bash
@@ -189,7 +232,7 @@ Design choices that generalise:
   only the per-entry text varies, so the big shared prefix is near-free across thousands of calls.
 - **Length-routed models** — short/standard entries → Haiku, long dense entries → Sonnet
   (configurable at the top of `extract.py`; switch to Opus there if you prefer maximum quality).
-- **OCR correction in-pass** — the transcript is uncorrected OCR (`commnne`→commune,
+- **OCR correction in-pass** — even good OCR leaves some misreads (`commnne`→commune,
   `villnge`→village, `fortres`→fortress…). The model fixes obvious garbling while it reads and
   logs each fix to an `ocr_corrections` QA trail — no separate, extra-cost correction pass.
 
@@ -243,13 +286,13 @@ A matching scan of **Volume V** (`data/pdf/gotw-v5.pdf`, with an OCR text layer)
 work tractable. `process/pdf_pages.py` maps printed page → PDF index from the header page numbers,
 handling the offset drift (16→80) caused by ~70 unpaginated steel plates that defeat a constant offset.
 
-- **Tables — analysed** — `process/parse_tables.py` parses the **140** tables already in the HTML into
-  structured rows (`table_data`) and classifies them by subject: trade 23, population 18, climate 13,
-  agriculture 11, area/revenue 9 (up to 74 rows).
-- **Tables — recovered from the scan** — `process/extract_tables.py` digitises any table directly from
-  the v5 scan with a vision-LLM (printed page → structured `{title, header, rows}`), recovering the
-  tables Southall's transcription dropped. Validated on the *Madras Presidency* page (the districts
-  table + a climate table, matching the HTML). Output-dominated and cached, like the Appendix.
+- **Tables — vision-LLM into `table_data`** — Surya's layout model does **not** detect these unruled
+  1856 tables, and prose OCR scrambles their cells, so `process/extract_tables.py` digitises them with a
+  vision-LLM. To bound cost it first flags **candidate pages by numeric-row runs** in the column-ordered
+  OCR (a table leaves a run of consecutive number-heavy lines; prose tops out ~2, tables score 6–9), then
+  sends each candidate to the model for structured `{title, header, rows}` stored in `table_data`.
+  Validated: the *Madras* climate + districts tables digitise cleanly, and the detector flags real table
+  pages (e.g. *Barbados* meteorology + trade, run 9). Output-dominated and cached, like the Appendix.
 - **Maps** — `process/extract_maps.py` finds illustration plates (ink-filtering out blank/stamp pages
   and marbled endpapers) and vision-classifies them. **Volume V contains no cartographic maps**: its 8
   steel plates are all city/landscape views (Magdeburg, Malta, Melrose Abbey, Mytelene, New York Bay,
@@ -296,7 +339,7 @@ thinking off; archaic long-ſ normalised). The **full Appendix is extracted**: 1
 
 `process/build_toponym_dict.py` then folds those rows into **`dict/toponyms.json` — a 27,528-toponym
 authority** (accent-folded key → best-attested canonical spelling + variant forms + era). It serves
-two purposes: it's name-variant data for WHG, and it's the authority the [OCR-correction step](#1b-ocr-correction--processcorrect_ocrpy)
+two purposes: it's name-variant data for WHG, and it's the authority the [toponym cross-check](#1c-toponym-cross-check--processcorrect_ocrpy)
 uses to settle place-name disagreements. (The Appendix's own OCR drops some accents, so a `--from-corpus`
 refinement — tallying spellings across all volumes, most-populous wins — will fill those in over time.)
 
@@ -306,8 +349,6 @@ refinement — tallying spellings across all volumes, most-populous wins — wil
 
 - **Royal Geographical Society** — corporate author of the source work, *A Gazetteer of the World*
   (A. Fullarton & Co., 1856), published anonymously "edited by a Member of the Royal Geographical Society".
-- **Prof. Humphrey Southall** — University of Portsmouth; Director, Great Britain Historical
-  GIS. Oversaw the OCR transcription of the seven volumes this project builds upon.
 - **World Historical Gazetteer** (University of Pittsburgh; Dir. Prof. Ruth Mostern) —
   reconciliation indices and the authority-gazetteer framework.
 - Place types use the Getty **Art & Architecture Thesaurus** (AAT), made available under the
