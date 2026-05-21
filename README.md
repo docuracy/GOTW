@@ -217,8 +217,13 @@ handling the offset drift (16→80) caused by ~70 unpaginated steel plates that 
   steel plates are all city/landscape views (Magdeburg, Malta, Melrose Abbey, Mytelene, New York Bay,
   Padua, Patras). The tool writes an illustration manifest (titles + page provenance) and would
   crop/export any genuine maps — more likely to appear in other volumes.
-- ⚠️ **Other volumes** — we currently hold scans of Vol V and Vol VII; acquiring the remaining five
-  volumes' scans is a prerequisite for table/map recovery across the whole corpus.
+- ⚠️ **Other volumes** — we hold scans of Vol V and Vol VII; the remaining five are a prerequisite for
+  table/map recovery across the corpus. Source them as the **1856 first edition = volumes 1–7** on
+  [HathiTrust 011407465](https://catalog.hathitrust.org/Record/011407465); the **undated 8–14 set** on
+  the same record is a *different edition* (its v14 reproduces 1856 v7's Article II) and must not be
+  mixed in. Trust each PDF's actual head-word range over its number — `process/pdf_coverage.py` reports
+  it from the OCR text layer (Vol V covers `LUS … PERTHSHIRE`; the Vol VII scan lacks a text layer) so
+  you can confirm the seven tile A–Z without overlap or gap.
 - **MapLibre demo** — a static GitHub Pages UI plotting the extracted, reconciled places with rich
   popups, live at [docuracy.github.io/GOTW/map.html](https://docuracy.github.io/GOTW/map.html). Built
   from the cached Gemini 2.5 Flash set via `process/export_geojson.py` → `docs/places.geojson`.
