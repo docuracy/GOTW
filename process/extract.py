@@ -64,6 +64,11 @@ class SpatialRelation(BaseModel):
     distance_unit: Optional[str]
 
 
+class Ethnonym(BaseModel):
+    name: str                      # precise people/ethnic-group name as printed, e.g. "Lumris", "Wends"
+    relation: Optional[str]        # how it relates to the place, e.g. "inhabitants", "named after"
+
+
 class Place(BaseModel):
     name: str
     variant_names: List[str]
@@ -77,6 +82,7 @@ class Place(BaseModel):
     longitude: Optional[float]
     population: List[Population]
     area: Optional[str]
+    peoples: List[Ethnonym]        # ethnonyms named in the entry; all typed AAT 300191997 "ethnic groups"
     notes: List[str]
 
 
@@ -167,6 +173,9 @@ Field rules:
   type. If a place plays several administrative roles, pick the most specific that applies. Use "other"
   only when no shortlist concept reasonably fits (e.g. a monastery, battlefield, ruin).
 - population: one entry per (year, count) pair printed, e.g. "Pop. in 1831, 6,893; in 1841, 7,002".
+- peoples: ethnonyms named for this place — the inhabitants or peoples mentioned (e.g. "Lumris",
+  "Numaris", "Lurs", "Wends/Serben"). Record each precise name as printed, with its relation
+  ("inhabitants", "named after", …). These are ethnographic data; do not also force them into aat_type_id.
 - notes: short factual phrases that aid disambiguation or typing (industries, rivers, antiquities). Omit prose.
 - Use null / empty lists when a field is absent. Do not guess.
 
