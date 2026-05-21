@@ -5,6 +5,7 @@ data/html/
 # Generated / derived artifacts (rebuild with process/ scripts)
 data/gotw.sqlite
 data/aat_index.pkl
+data/maps/
 
 # Secrets — never commit
 .env

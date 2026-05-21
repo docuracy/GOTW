@@ -16,7 +16,7 @@ author**.
 
 > **Two different volumes are in play.** The OCR transcript we parse is **Volume V**; the scanned PDF
 > in `data/pdf/` is **Volume VII (TA–ZZUBIN, with Appendix)**. They are different volumes of the same
-> work — so the HTML's page numbers do **not** index the held PDF (see [table/map recovery](#5-table--map-recovery-and-the-demo-todo)).
+> work — so the HTML's page numbers do **not** index the held PDF (see [table/map recovery](#5-tables-maps-and-the-demo)).
 > Volume VII's Appendix, however, is itself a prize: a bidirectional ancient↔modern toponym
 > concordance — see [the Appendix concordance](#6-volume-vii-appendix--ancientmodern-concordance-prototyped).
 
@@ -85,7 +85,7 @@ naive splitting:
   headers) are merged back into the place they describe.
 - **Cross-references** (`Luttich. See Liege.`) are classified as `kind='crossref'` with
   the target in `see_target`.
-- **Statistical tables** are attached to their place (`n_tables`) — see [table recovery](#5-table--map-recovery-and-the-demo-todo).
+- **Statistical tables** are attached to their place (`n_tables`) — see [table recovery](#5-tables-maps-and-the-demo).
 - **Toponym case** — headwords are printed UPPERCASE; `headword_disp` holds a title-cased
   form (`LUS-LA-CROIX-HAUTE` → `Lus-la-Croix-Haute`) with multilingual particles
   (`de`, `la`, `von`, `of`, …) lower-cased.
@@ -199,22 +199,29 @@ What the live API actually rewards (probe before you trust the docs):
 
 On the 8 curated demo places this reconciles **8/8** with correct coordinates.
 
-### 5. Table & map recovery, and the demo *(todo)*
+### 5. Tables, maps, and the demo
 
-- **Tables** — per Humphrey Southall, many embedded statistical tables were omitted in
-  transcription (Vol 5 keeps 140). Recover them by **digitising the scanned page with a
-  vision/image-LLM** (cropped page image → structured rows), not plain OCR, which mangles tabular
-  structure. ⚠️ Note the held PDF is **Volume VII**, while the parsed transcript is **Volume V** — so
-  the entries' `page_start`/`page_end` index Vol V, not this PDF. Recovering Vol V tables/maps needs
-  the Vol V scans; the same vision-LLM method applies to either once the right scan is in hand.
-  **archive.org holds only Volume VII**, so **acquiring scanned PDFs of the other six volumes is a
-  prerequisite for table (and map) recovery** across the corpus — without them, only Vol VII's own
-  entries could have their tables digitised from images.
-- **Maps** — carried as part of the scanned page images (no vector data); detect map regions
-  on the relevant scans and render to linked image files.
-- **MapLibre demo** *(done)* — a static GitHub Pages UI plotting the extracted, reconciled places
-  with rich popups, live at [docuracy.github.io/GOTW/map.html](https://docuracy.github.io/GOTW/map.html).
-  Built from the cached Gemini 2.5 Flash set via `process/export_geojson.py` → `docs/places.geojson`.
+A matching scan of **Volume V** (`data/pdf/gotw-v5.pdf`, with an OCR text layer) makes table and map
+work tractable. `process/pdf_pages.py` maps printed page → PDF index from the header page numbers,
+handling the offset drift (16→80) caused by ~70 unpaginated steel plates that defeat a constant offset.
+
+- **Tables — analysed** — `process/parse_tables.py` parses the **140** tables already in the HTML into
+  structured rows (`table_data`) and classifies them by subject: trade 23, population 18, climate 13,
+  agriculture 11, area/revenue 9 (up to 74 rows).
+- **Tables — recovered from the scan** — `process/extract_tables.py` digitises any table directly from
+  the v5 scan with a vision-LLM (printed page → structured `{title, header, rows}`), recovering the
+  tables Southall's transcription dropped. Validated on the *Madras Presidency* page (the districts
+  table + a climate table, matching the HTML). Output-dominated and cached, like the Appendix.
+- **Maps** — `process/extract_maps.py` finds illustration plates (ink-filtering out blank/stamp pages
+  and marbled endpapers) and vision-classifies them. **Volume V contains no cartographic maps**: its 8
+  steel plates are all city/landscape views (Magdeburg, Malta, Melrose Abbey, Mytelene, New York Bay,
+  Padua, Patras). The tool writes an illustration manifest (titles + page provenance) and would
+  crop/export any genuine maps — more likely to appear in other volumes.
+- ⚠️ **Other volumes** — we currently hold scans of Vol V and Vol VII; acquiring the remaining five
+  volumes' scans is a prerequisite for table/map recovery across the whole corpus.
+- **MapLibre demo** — a static GitHub Pages UI plotting the extracted, reconciled places with rich
+  popups, live at [docuracy.github.io/GOTW/map.html](https://docuracy.github.io/GOTW/map.html). Built
+  from the cached Gemini 2.5 Flash set via `process/export_geojson.py` → `docs/places.geojson`.
 
 > **Looking ahead — demographic change over time.** Extraction captures population as a structured
 > `[{year, count}]` time series (the source carries population figures in ~53% of entries, often for
