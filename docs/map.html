@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <title>Gazetteer of the World — extracted places</title>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
@@ -77,12 +78,16 @@
   const esc = s => (s||"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 
   function popupHTML(p) {
+    // MapLibre serialises array/object properties to JSON strings — parse notes back.
+    let notes = p.notes;
+    if (typeof notes === "string") { try { notes = JSON.parse(notes); } catch { notes = []; } }
+    if (!Array.isArray(notes)) notes = [];
     let h = `<div class="pop"><h3>${esc(p.name)}</h3>`;
     h += `<p class="meta">${esc(p.type)}${p.country ? " · " + esc(p.country) : ""}</p><dl>`;
     if (p.admin) h += `<dt>Within</dt><dd>${esc(p.admin)}</dd>`;
     if (p.variants) h += `<dt>Also</dt><dd>${esc(p.variants)}</dd>`;
     if (p.population) h += `<dt>Population</dt><dd>${esc(p.population)}</dd>`;
-    if (p.notes && p.notes.length) h += `<dt>Notes</dt><dd><ul>${p.notes.map(n=>`<li>${esc(n)}</li>`).join("")}</ul></dd>`;
+    if (notes.length) h += `<dt>Notes</dt><dd><ul>${notes.map(n=>`<li>${esc(n)}</li>`).join("")}</ul></dd>`;
     h += `</dl><p class="src">Source: Vol.&nbsp;5, p.&nbsp;${p.page ?? "—"}` +
          (p.headword && p.headword !== p.name ? ` (under <em>${esc(p.headword)}</em>)` : "") +
          `<br>WHG match: ${whgLink(p.whg_id)}${p.whg_score!=null?` · score ${p.whg_score}`:""}</p></div>`;
