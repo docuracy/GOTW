@@ -26,7 +26,8 @@ from typing import List, Optional
 from pydantic import BaseModel
 import fitz
 
-PDF = "data/pdf/agazetteerworld00unkngoog.pdf"
+PDF = "data/pdf/gotw-v7.pdf"      # Vol VII scan (override with --pdf)
+_PDF = PDF                         # active path (set from --pdf in main)
 RENDER_MATRIX = 3.0          # ~216 dpi — dense small two-column print needs resolution
 MAX_OUTPUT = 32768           # a dense two-column index page is ~100-150 rows of JSON
 PROVIDER_MODELS = {"gemini": "gemini-2.5-flash", "claude": "claude-sonnet-4-6"}
@@ -95,7 +96,7 @@ def cache_key(provider, model, page_idx):
 
 
 def render_jpeg(idx):
-    d = fitz.open(PDF)
+    d = fitz.open(_PDF)
     return d[idx].get_pixmap(matrix=fitz.Matrix(RENDER_MATRIX, RENDER_MATRIX)).tobytes("jpeg")
 
 
@@ -162,6 +163,7 @@ def gen_claude(model, jpeg):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default="data/gotw.sqlite")
+    ap.add_argument("--pdf", default=PDF, help="volume scan to render Appendix pages from")
     ap.add_argument("--provider", choices=["gemini", "claude"], default="gemini")
     ap.add_argument("--model")
     ap.add_argument("--pages", help="comma-separated PDF page indices")
@@ -169,6 +171,8 @@ def main():
     ap.add_argument("--direction", choices=["a2m", "m2a"], default="a2m")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+    global _PDF
+    _PDF = args.pdf
 
     if args.pages:
         idxs = [int(x) for x in args.pages.split(",")]
