@@ -18,7 +18,7 @@ author**.
 > in `data/pdf/` is **Volume VII (TA–ZZUBIN, with Appendix)**. They are different volumes of the same
 > work — so the HTML's page numbers do **not** index the held PDF (see [table/map recovery](#5-table--map-recovery-and-the-demo-todo)).
 > Volume VII's Appendix, however, is itself a prize: a bidirectional ancient↔modern toponym
-> concordance — see [the Appendix concordance](#6-volume-vii-appendix--ancientmodern-concordance-todo).
+> concordance — see [the Appendix concordance](#6-volume-vii-appendix--ancientmodern-concordance-prototyped).
 
 ---
 
@@ -70,8 +70,7 @@ pip install anthropic beautifulsoup4 lxml tiktoken pymupdf pydantic
 # Secrets go in .env (git-ignored): WHG_API_TOKEN, ANTHROPIC_API_KEY
 ```
 
-### 1. Parse — `process/parse_html.py` *(done)*
-
+### 1. Parse — `process/parse_html.py`
 ```bash
 python3 process/parse_html.py data/html/gotw_vol5_all_web_v1.html --db data/gotw.sqlite
 ```
@@ -86,7 +85,7 @@ naive splitting:
   headers) are merged back into the place they describe.
 - **Cross-references** (`Luttich. See Liege.`) are classified as `kind='crossref'` with
   the target in `see_target`.
-- **Statistical tables** are attached to their place (`n_tables`) — see [table recovery](#table-recovery-todo).
+- **Statistical tables** are attached to their place (`n_tables`) — see [table recovery](#5-table--map-recovery-and-the-demo-todo).
 - **Toponym case** — headwords are printed UPPERCASE; `headword_disp` holds a title-cased
   form (`LUS-LA-CROIX-HAUTE` → `Lus-la-Croix-Haute`) with multilingual particles
   (`de`, `la`, `von`, `of`, …) lower-cased.
@@ -99,8 +98,7 @@ entries (≈14,800 places once split) · pages 1–874.
 the workload is write-heavy incremental updates as extraction and reconciliation complete;
 export to Parquet/DuckDB for analytics whenever you want.
 
-### 2. Feature-type vocabulary — `process/aat_resolve.py`, `process/build_aat_shortlist.py` *(done)*
-
+### 2. Feature-type vocabulary — `process/aat_resolve.py`, `process/build_aat_shortlist.py`
 ```bash
 python3 process/aat_resolve.py            # build/validate the AAT index from the local Getty dump
 python3 process/build_aat_shortlist.py    # write + self-validate data/aat_shortlist.json
@@ -116,8 +114,7 @@ id** against the AAT index, so a wrong/stale id fails loudly rather than silentl
 > *per language*; the English term URI ends `-en`. Keep the `-en` one or you silently drop
 > most concepts. The dump (~59k concepts) is complete as of 2026-01 — no re-download needed.
 
-### 3. LLM extraction → `place` — `process/extract.py` *(done)*
-
+### 3. LLM extraction → `place` — `process/extract.py`
 ```bash
 python3 process/extract.py --dry-run --limit 1                  # prompt + schema + a request (no key)
 python3 process/extract.py --provider gemini --limit 20         # sync (Flash-Lite/Flash)
@@ -175,8 +172,7 @@ as a worked example for practitioners weighing extraction models.
 prompt caching makes the shared prefix negligible. ⚠️ Rates are assumed list prices — confirm
 before committing spend. Re-derive exactly once all 7 files are parsed: `SELECT SUM(tokens) FROM entry`.
 
-### 4. Reconcile against WHG — `process/reconcile.py` *(done)*
-
+### 4. Reconcile against WHG — `process/reconcile.py`
 ```bash
 python3 process/reconcile.py --seed-demo 8   # curated demo places (no extraction needed)
 python3 process/reconcile.py --limit 50      # reconcile pending places
@@ -211,6 +207,9 @@ On the 8 curated demo places this reconciles **8/8** with correct coordinates.
   structure. ⚠️ Note the held PDF is **Volume VII**, while the parsed transcript is **Volume V** — so
   the entries' `page_start`/`page_end` index Vol V, not this PDF. Recovering Vol V tables/maps needs
   the Vol V scans; the same vision-LLM method applies to either once the right scan is in hand.
+  **archive.org holds only Volume VII**, so **acquiring scanned PDFs of the other six volumes is a
+  prerequisite for table (and map) recovery** across the corpus — without them, only Vol VII's own
+  entries could have their tables digitised from images.
 - **Maps** — carried as part of the scanned page images (no vector data); detect map regions
   on the relevant scans and render to linked image files.
 - **MapLibre demo** *(done)* — a static GitHub Pages UI plotting the extracted, reconciled places
@@ -224,7 +223,7 @@ On the 8 curated demo places this reconciles **8/8** with correct coordinates.
 > reconciliation step attaches — making it possible to visualise long-run demographic change place by
 > place. The structured, ID-linked output is the enabling step; the gazetteer becomes a dated baseline.
 
-### 6. Volume VII Appendix — ancient/modern concordance *(todo)*
+### 6. Volume VII Appendix — ancient/modern concordance *(prototyped)*
 
 The held PDF (Volume VII) ends with an **Appendix that is itself a toponym-variant goldmine** for WHG —
 a bidirectional concordance of historical and modern place names:
@@ -235,11 +234,17 @@ a bidirectional concordance of historical and modern place names:
 - **Article II** (printed p.745): *"Reversed Modern, Ancient, and Mediæval Index"* — the inverse,
   modern → ancient/mediæval (e.g. *Aachen → Aquisgranum, Aquae Grani*).
 
-These pages are scanned images with no text layer, so extraction needs the **vision/image-LLM** approach
-(printed page = PDF index − 52). The output — `{modern, ancient[], mediaeval[]}` variant sets — feeds
-WHG's name-variant indices directly and would also enrich this project's own toponym matching. Worth
-checking whether Humphrey Southall's transcripts already cover the Appendix before re-extracting; the
-Volume V HTML we hold does not (it is a different volume).
+These pages are scanned images with no text layer, so extraction uses a **vision-LLM**
+(`process/extract_appendix.py`: render page → vision model → structured `{headword, equivalents[],
+note}` rows → `name_variant` table; printed page = PDF index − 52; results cached per page).
+
+**Prototype validated** on two pages (Gemini 2.5 Flash): 91 rows from the Article I page
+(*Caterlogum → Carlow [in co. Carlow]*) and 144 from the reversed-index page (*Vidin → Bidinum*) —
+notes and multi-name equivalents captured. At ~115 rows/page over ≈185 pages that's **~21,000 variant
+pairs**, for a measured **≈ $2.50 (≈$1.25 batched)** with Gemini Flash — see the costing in
+[`docs/model-comparison.md`](docs/model-comparison.md). The output feeds WHG's name-variant indices and
+this project's own toponym matching. (Worth checking whether Humphrey Southall's transcripts already
+cover the Appendix before a full run; the Volume V HTML we hold does not — it is a different volume.)
 
 ---
 

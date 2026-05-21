@@ -21,6 +21,16 @@ This is an evidence base for choosing an extraction model for a historical-PDF �
 | `gemini:gemini-2.5-flash-lite` | 85% | 0.84 | 81% | 100% |
 | `gemini:gemini-2.5-flash` | 80% | 0.87 | 87% | 100% |
 
+## Appendix concordance (Volume VII) — vision-LLM costing
+
+A separate task: the Vol VII Appendix is a bidirectional ancient↔modern toponym index, ≈185 dense two-column scanned pages (~115 rows/page → ~21,000 variant pairs). `process/extract_appendix.py` sends each page image to a vision model for structured rows. Costs below are measured from the cached sample page(s).
+
+| model | pages sampled | rows | avg in/out tok/page | $/page | $/full Appendix | batch |
+|---|--:|--:|--:|--:|--:|--:|
+| `gemini-2.5-flash` | 2 | 235 | 447/5,341 | $0.0135 | $2.50 | $1.25 |
+
+> Image input is cheap here — the page counts as only a few hundred input tokens; cost is output-dominated (the transcribed rows). Vision thinking is disabled (pure transcription).
+
 ## Where the models disagree
 
 Entries where configs differ on place count, AAT type, or country code (the rest agreed). Useful for spotting failure modes.

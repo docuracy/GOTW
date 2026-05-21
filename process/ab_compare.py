@@ -182,6 +182,33 @@ def main():
             f"{a['aat_match%']}% | {a['ccode_match%']}% |")
     add("")
 
+    # ---- Appendix concordance costing (if extract_appendix.py has populated the cache) ----
+    app = con.execute("SELECT model, usage_json, response_json FROM llm_cache "
+                      "WHERE response_json LIKE '%\"rows\":%'").fetchall()
+    if app:
+        APP_PAGES = 185   # concordance extent (PDF idx ~711–896)
+        by = {}
+        for model, uj, rj in app:
+            u = json.loads(uj or "{}")
+            nrows = len(json.loads(rj).get("rows", []))
+            d = by.setdefault(model, [0, 0, 0, 0])     # pages, rows, in_tok, out_tok
+            d[0] += 1; d[1] += nrows
+            d[2] += u.get("input") or 0; d[3] += u.get("output") or 0
+        add("## Appendix concordance (Volume VII) — vision-LLM costing\n")
+        add("A separate task: the Vol VII Appendix is a bidirectional ancient↔modern toponym index, "
+            f"≈{APP_PAGES} dense two-column scanned pages (~115 rows/page → ~21,000 variant pairs). "
+            "`process/extract_appendix.py` sends each page image to a vision model for structured rows. "
+            "Costs below are measured from the cached sample page(s).\n")
+        add("| model | pages sampled | rows | avg in/out tok/page | $/page | $/full Appendix | batch |")
+        add("|---|--:|--:|--:|--:|--:|--:|")
+        for model, (pg, nrows, ti, to) in by.items():
+            ri, ro = RATES.get(model, (0, 0))
+            ppc = (ti / pg / 1e6 * ri) + (to / pg / 1e6 * ro)
+            add(f"| `{model}` | {pg} | {nrows} | {ti//pg:,}/{to//pg:,} | ${ppc:.4f} | "
+                f"${ppc*APP_PAGES:,.2f} | ${ppc*APP_PAGES*0.5:,.2f} |")
+        add("\n> Image input is cheap here — the page counts as only a few hundred input tokens; cost is "
+            "output-dominated (the transcribed rows). Vision thinking is disabled (pure transcription).\n")
+
     # ---- per-entry disagreements ----
     add("## Where the models disagree\n")
     add("Entries where configs differ on place count, AAT type, or country code "
