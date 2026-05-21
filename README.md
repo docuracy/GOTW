@@ -222,8 +222,11 @@ handling the offset drift (16→80) caused by ~70 unpaginated steel plates that 
   [HathiTrust 011407465](https://catalog.hathitrust.org/Record/011407465); the **undated 8–14 set** on
   the same record is a *different edition* (its v14 reproduces 1856 v7's Article II) and must not be
   mixed in. Trust each PDF's actual head-word range over its number — `process/pdf_coverage.py` reports
-  it from the OCR text layer (Vol V covers `LUS … PERTHSHIRE`; the Vol VII scan lacks a text layer) so
-  you can confirm the seven tile A–Z without overlap or gap.
+  it from the OCR text layer (Vol I `AAR…BRA`, Vol V `LUX…PERTHSHIRE`; the Vol VII scan lacks a text
+  layer) so you can confirm the seven tile A–Z without overlap or gap. HathiTrust 600dpi page-image
+  zips + the OCR `.txt` are bundled into a searchable per-volume PDF by `process/build_pdf.py`
+  (image + invisible OCR layer; reads HathiTrust's `## p. N` page markers); it deletes the bulky
+  `.zip`/`.txt` once the PDF is verified (`--keep` to retain).
 - **MapLibre demo** — a static GitHub Pages UI plotting the extracted, reconciled places with rich
   popups, live at [docuracy.github.io/GOTW/map.html](https://docuracy.github.io/GOTW/map.html). Built
   from the cached Gemini 2.5 Flash set via `process/export_geojson.py` → `docs/places.geojson`.

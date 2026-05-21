@@ -15,11 +15,17 @@ full-text work, use the .txt directly. The OCR .txt is split into pages on form-
         --out data/pdf/gotw-v6.pdf
 """
 from __future__ import annotations
-import argparse, re, sys
+import argparse, re, shutil, sys, tempfile, zipfile
 from pathlib import Path
 import fitz
 
 IMG_EXT = {".jpg", ".jpeg", ".tif", ".tiff", ".png"}
+
+
+def _du(path: Path) -> int:
+    if path.is_dir():
+        return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    return path.stat().st_size if path.exists() else 0
 
 
 def natural_key(p: Path):
@@ -28,15 +34,32 @@ def natural_key(p: Path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--images", required=True, help="folder of page images (one per page)")
+    ap.add_argument("--images", required=True, help="page-images .zip OR a folder of page images")
     ap.add_argument("--txt", help="HathiTrust OCR plain-text (form-feed delimited)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--dpi", type=int, default=600, help="scan resolution of the images")
     ap.add_argument("--fontsize", type=float, default=6.0, help="invisible text-layer font size")
+    ap.add_argument("--keep", action="store_true", help="keep source .zip/.txt (default: delete on success)")
     args = ap.parse_args()
 
-    imgs = sorted((p for p in Path(args.images).iterdir() if p.suffix.lower() in IMG_EXT), key=natural_key)
+    src = Path(args.images)
+    tmp_dir = None                       # our temp extraction (always removed at the end)
+    sources = []                         # user source files to delete on success
+    if src.suffix.lower() == ".zip":
+        tmp_dir = Path(tempfile.mkdtemp(dir=src.parent, prefix=".extract_"))
+        print(f"extracting {src.name} …")
+        with zipfile.ZipFile(src) as z:
+            z.extractall(tmp_dir)
+        img_root, sources = tmp_dir, [src]
+    else:
+        img_root, sources = src, [src]
+    if args.txt:
+        sources.append(Path(args.txt))
+
+    imgs = sorted((p for p in img_root.rglob("*") if p.suffix.lower() in IMG_EXT), key=natural_key)
     if not imgs:
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
         sys.exit(f"no page images in {args.images}")
 
     pages_txt = []
@@ -68,15 +91,34 @@ def main():
         pix = None
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     doc.save(args.out, deflate=True, garbage=3)
-    size = Path(args.out).stat().st_size
+    n_pages = len(doc)
+    sample = doc[n_pages // 2].get_text().strip().splitlines()[:3] if n_pages else []
+    doc.close()
 
-    # quick self-check: does a mid-volume page expose its OCR text (header etc.)?
-    sample = doc[len(doc) // 2].get_text().strip().splitlines()[:3] if len(doc) else []
-    print(f"wrote {len(imgs)} pages ({embedded} with text) -> {args.out}  ({size/1e6:.0f} MB)")
+    # verify the PDF before deleting anything: right page count, real size, text retrievable
+    out = Path(args.out)
+    size = out.stat().st_size
+    v = fitz.open(out)
+    ok = (v.page_count == len(imgs) and size > 1_000_000
+          and (not args.txt or bool(v[v.page_count // 2].get_text().strip())))
+    v.close()
+    print(f"wrote {len(imgs)} pages ({embedded} with text) -> {out}  ({size/1e6:.0f} MB)")
     if args.txt:
         print(f"  text-layer check (mid page, first lines): {sample}")
-        print("  → run: python3 process/pdf_coverage.py " + args.out)
-    doc.close()
+
+    if tmp_dir:
+        shutil.rmtree(tmp_dir, ignore_errors=True)        # our temp extraction, always
+    if not ok:
+        sys.exit("⚠ PDF failed verification (page count / size / text layer) — sources NOT deleted")
+    if args.keep:
+        print("  sources kept (--keep)")
+    else:
+        freed = sum(_du(s) for s in sources)
+        for s in sources:
+            if s.exists():
+                shutil.rmtree(s) if s.is_dir() else s.unlink()
+        print(f"  deleted sources, freed ~{freed/1e9:.2f} GB: {', '.join(s.name for s in sources)}")
+    print("  → verify coverage: python3 process/pdf_coverage.py " + str(out))
 
 
 if __name__ == "__main__":

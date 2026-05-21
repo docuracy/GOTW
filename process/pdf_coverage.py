@@ -22,7 +22,8 @@ pp.__spec__.loader.exec_module(pp)
 def running_head(page):
     """The headword running-head (first all-caps-ish line of the OCR text)."""
     for ln in (l.strip() for l in page.get_text().splitlines() if l.strip()):
-        if re.fullmatch(r"[A-Z][A-Z .'\-]{1,}", ln):     # running heads are upper-case words
+        if re.fullmatch(r"[A-Z][A-Z .'\-]{2,}", ln) and sum(c.isalpha() for c in ln) >= 3 \
+                and not re.fullmatch(r"[IVXLCDM]+\.?", ln):   # skip romans / short front-matter noise
             return ln
     return "?"
 
@@ -34,8 +35,11 @@ def coverage(pdf_path):
         return {"pages": d.page_count, "plates": len(plates), "no_text": True,
                 "first_head": "(no OCR text layer)", "last_head": ""}
     nums = sorted(pi)
+    # sample a few leaves in / before the end to skip front-matter title pages & colophons
+    lo = pi[nums[min(len(nums) - 1, 4)]]
+    hi = pi[nums[max(0, len(nums) - 2)]]
     return {"pages": d.page_count, "printed": (nums[0], nums[-1]), "no_text": False,
-            "first_head": running_head(d[pi[nums[0]]]), "last_head": running_head(d[pi[nums[-1]]]),
+            "first_head": running_head(d[lo]), "last_head": running_head(d[hi]),
             "plates": len(plates)}
 
 

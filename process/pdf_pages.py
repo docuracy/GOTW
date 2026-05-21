@@ -16,10 +16,16 @@ import fitz
 PLATE_MAX_TEXT = 120   # chars of text below which a page is treated as a plate/illustration
 
 
+_HT_MARKER = re.compile(r"##\s*p\.\s*(\d{1,3})\b")   # HathiTrust pagetxt: "## p. 440 (#482) ####"
+
+
 def _header_pageno(text: str):
-    """The printed page number from a page's OCR header (first ~6 non-empty lines)."""
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()][:6]
-    for ln in lines:
+    """The printed page number: HathiTrust '## p. N' marker if present, else a bare
+    integer line in the OCR header (first ~6 non-empty lines)."""
+    m = _HT_MARKER.search(text[:200])
+    if m:
+        return int(m.group(1))
+    for ln in ([ln.strip() for ln in text.splitlines() if ln.strip()][:6]):
         if re.fullmatch(r"\d{1,3}", ln):
             n = int(ln)
             if 1 <= n <= 999:
