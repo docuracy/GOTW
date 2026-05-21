@@ -45,6 +45,9 @@ class Page(BaseModel):
     rows: List[Row]
 
 
+Page.model_rebuild()        # resolve forward refs eagerly (import-safe)
+
+
 def _strict(model):
     s = model.model_json_schema()
     def walk(n):
