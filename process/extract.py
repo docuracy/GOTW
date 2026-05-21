@@ -66,7 +66,8 @@ class Place(BaseModel):
     variant_names: List[str]       # alternative/foreign spellings printed in the entry
     feature_term: str              # the gazetteer's own word(s), e.g. "village", "canton, commune, and town"
     aat_type_id: AATTypeId         # Getty AAT concept id from the shortlist (or "other")
-    country: Optional[str]         # modern-or-period country/state named in the entry
+    country: Optional[str]         # country/state as named in the entry (may be historical, e.g. "Persia")
+    country_code: Optional[str]    # present-day ISO 3166-1 alpha-2 code for that place (e.g. "IR", "IT")
     admin_hierarchy: List[str]     # containing units, largest -> smallest (province, dep., canton, …)
     spatial_relations: List[SpatialRelation]
     latitude: Optional[float]      # decimal degrees if coordinates are printed (S/W negative)
@@ -155,6 +156,9 @@ Reading the abbreviations:
   make South latitudes and West longitudes NEGATIVE. Only set latitude/longitude when coordinates are printed.
 
 Field rules:
+- country_code: the PRESENT-DAY ISO 3166-1 alpha-2 code for where this place now lies, mapping historical
+  names to modern states (Persia→IR; Naples/Sardinia→IT; Prussia→DE or PL; Illyria→HR/SI). This drives
+  reconciliation, so set it whenever the country is clear; use null only when genuinely uncertain.
 - name: the toponym in normalised TITLE CASE (the source prints it UPPERCASE), e.g. "Lus-la-Croix-Haute".
 - feature_term: the gazetteer's own descriptor verbatim (e.g. "village", "canton, commune, and town").
 - aat_type_id: choose the single best-fitting concept id from the shortlist below for THIS place's primary

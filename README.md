@@ -139,13 +139,33 @@ Design choices that generalise:
 prompt caching makes the shared prefix negligible. ⚠️ Rates are assumed list prices — confirm
 before committing spend. Re-derive exactly once all 7 files are parsed: `SELECT SUM(tokens) FROM entry`.
 
-### 4. Reconcile against WHG *(next)*
+### 4. Reconcile against WHG — `process/reconcile.py` *(done)*
 
-Geolocate each `place` via WHG's
-[Reconciliation API](https://docs.whgazetteer.org/content/technical/apis.html#reconciliation-service-api),
-sending the extracted disambiguation context (name + containing region/country) as the query
-and writing the chosen match's id + coordinates back to `place` (`whg_match_id`, `lat`, `lon`).
-The API token is read from `.env` (`WHG_API_TOKEN`) — never hard-code or commit it.
+```bash
+python3 process/reconcile.py --seed-demo 8   # curated demo places (no extraction needed)
+python3 process/reconcile.py --limit 50      # reconcile pending places
+```
+
+Geolocates each `place` via WHG's
+[Reconciliation API](https://docs.whgazetteer.org/content/technical/apis.html#reconciliation-service-api):
+it sends the extracted disambiguation context, picks the best candidate by score, fetches that
+match's centroid via a data-extension call, and writes `whg_match_id`, `whg_score`, `lat`, `lon`,
+and the full candidate JSON back to `place`. The token is read from `.env` (`WHG_API_TOKEN`).
+
+What the live API actually rewards (probe before you trust the docs):
+- **Don't filter by AAT type.** `types: ["aat:…"]` returns *zero* hits — WHG isn't indexed by AAT;
+  our typing is enrichment, not a query key.
+- **Filter by country, via `countries` (ISO codes), not `fclasses` or `ccodes`.** `fclasses` is too
+  sparse to rely on; `ccodes` is accepted but doesn't actually constrain; only `countries` genuinely
+  filters. This is why extraction emits a present-day `country_code`. It's decisive: it moved
+  *Lusatia* off **Lusaka, Zambia** and *Luton* off a Devon namesake onto Bedfordshire.
+- **Threshold on `score`, not `match`** — WHG's `match` flag is conservative (a score-100 hit can be
+  `match:false`).
+- **Coords-only fallback for recall** — a country filter drops places whose WHG record lacks a country
+  code (e.g. small islands); when that happens and the gazetteer printed coordinates, retry without
+  `countries` using `lat`/`lng`/`radius`.
+
+On the 8 curated demo places this reconciles **8/8** with correct coordinates.
 
 ### 5. Table & map recovery, and the demo *(todo)*
 
