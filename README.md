@@ -149,6 +149,16 @@ Design choices that generalise:
   `villnge`→village, `fortres`→fortress…). The model fixes obvious garbling while it reads and
   logs each fix to an `ocr_corrections` QA trail — no separate, extra-cost correction pass.
 
+**Choosing a model — `process/ab_compare.py`.** Runs a deterministic sample through several
+`provider:model` configs (reusing the cache, never touching `place`) and reports cost, field
+coverage, and inter-model agreement (no gold standard, so agreement is a quality proxy), with a
+per-entry disagreement dump. On a 20-entry sample, all three models agreed **100% on `country_code`**
+(the reconciliation-critical field) and ~80–87% on AAT type and place-count; Gemini Flash-Lite came
+in ~12× cheaper than Haiku and Flash ~3× cheaper. It also caught a real quality issue — Flash-Lite
+*parroted the prompt's OCR examples* as if it had found them, inflating `ocr_corrections` — so the
+cheapest model isn't automatically the right one. (Run it yourself; results are cached, so it's free
+to re-run.)
+
 **Cost (full 7-file corpus)** — extrapolated ×7 from Volume 5 by `process/estimate_cost.py`:
 ≈87,000 entries / ≈104,000 places / ≈13M input tokens → **≈ $84 via the Batch API**
 (range $72 all-Haiku … $216 all-Sonnet; ~2× for realtime). Dominated by *output* tokens;
