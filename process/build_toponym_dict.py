@@ -66,9 +66,13 @@ def main():
             for tok in TOPO.findall(eq):
                 add(index, tok, eq_era)
 
+    def best(forms):
+        # prefer a diacritic'd, non-ALL-CAPS, well-attested spelling (Isère > ISÈRE > ISERE)
+        return max(forms, key=lambda f: (any(ord(c) > 127 for c in f), not f.isupper(), forms[f]))
+
     out = {}
     for k, e in index.items():
-        canonical = e["forms"].most_common(1)[0][0]
+        canonical = best(e["forms"])
         out[k] = {"canonical": canonical, "forms": dict(e["forms"]),
                   "count": sum(e["forms"].values()), "eras": sorted(e["eras"])}
     OUT.parent.mkdir(parents=True, exist_ok=True)
