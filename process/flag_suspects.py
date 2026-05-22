@@ -5,7 +5,7 @@ alters OCR text, it only routes entries to ok-in-index vs needs-review.
 Run in the whg conda env on a CRC compute node (gateway reachable, no token):
     python3 process/flag_suspects.py data/gotw_seg.sqlite
 """
-import sqlite3, re, sys, json, urllib.request, os
+import sqlite3, re, sys, json, urllib.request, os, difflib
 
 DB = sys.argv[1] if len(sys.argv) > 1 else "data/gotw_seg.sqlite"
 GATEWAY = os.getenv("WHG_GATEWAY_URL", "http://gazetteer-clus.crc.pitt.edu:9200") + "/api/reconcile"
@@ -34,26 +34,51 @@ def intrinsic_flags(hw, text, kind):
     return f
 
 
-def gw_query(name, mode="fuzzy", size=3):
+def gw(name, mode, size):
     body = json.dumps({"query": name, "mode": mode, "size": size}).encode()
     req = urllib.request.Request(GATEWAY, data=body, headers={"Content-Type": "application/json"})
     try:
-        r = json.load(urllib.request.urlopen(req, timeout=20))
-        hits = r.get("hits", [])
-        return (hits[0].get("score"), hits[0].get("title", "")) if hits else (0.0, "")
-    except Exception as e:
-        return (None, f"ERR {e}"[:50])
+        return json.load(urllib.request.urlopen(req, timeout=20)).get("hits", [])
+    except Exception:
+        return None
+
+
+def assess(disp):
+    """Loose reasonableness: exact-match in the index => verbatim known toponym; else best string
+    similarity to a fuzzy hit's names (the gateway 'score' is rank, not similarity, so we compute it).
+    Returns (verdict, similarity 0..1, best_hit_name)."""
+    q = alpha(disp)
+    ex = gw(disp, "exact", 1)
+    if ex is None:
+        return ("review", None, "ERR")          # gateway unreachable
+    if ex:
+        return ("ok-in-index", 1.0, ex[0].get("title", ""))
+    def nstr(nm):
+        if isinstance(nm, str):
+            return nm
+        if isinstance(nm, dict):
+            return (nm.get("toponym") or nm.get("name") or nm.get("label")
+                    or next((v for v in nm.values() if isinstance(v, str)), ""))
+        return ""
+    best, bt = 0.0, ""
+    for h in (gw(disp, "fuzzy", 5) or []):
+        cands = [h.get("title", "")] + [nstr(nm) for nm in (h.get("names") or [])]
+        for nm in cands:
+            r = difflib.SequenceMatcher(None, q, alpha(nm)).ratio()
+            if r > best:
+                best, bt = r, nm
+    return ("likely-variant" if best >= 0.88 else "review", round(best, 3), bt)
 
 
 # --- gateway self-test ---
-for probe in ("Acre", "Mozambique", "Tna", "Xqzzr"):
-    print(f"  probe {probe!r:14} -> {gw_query(probe)}")
+for probe in ("Acre", "Mozambique", "Tna", "Xqzzr", "Maulmain"):
+    print(f"  probe {probe!r:14} -> {assess(probe)}")
 
 con = sqlite3.connect(DB)
 print("entries:", con.execute("SELECT COUNT(*) FROM entry").fetchone()[0],
       "max-len:", con.execute("SELECT max(length(text)) FROM entry").fetchone()[0])
 con.execute("DROP TABLE IF EXISTS qa")
-con.execute("CREATE TABLE qa(entry_id INTEGER PRIMARY KEY, flags TEXT, idx_score REAL, "
+con.execute("CREATE TABLE qa(entry_id INTEGER PRIMARY KEY, flags TEXT, idx_sim REAL, "
             "idx_hit TEXT, verdict TEXT)")
 
 suspects = []
@@ -65,9 +90,7 @@ for eid, hw, disp, text, kind in con.execute(
 print("intrinsic suspects:", len(suspects))
 
 for eid, disp, fl in suspects:
-    score, hit = gw_query(disp)
-    verdict = "review" if (score is None or score < 90) else "ok-in-index"
-    con.execute("INSERT INTO qa VALUES(?,?,?,?,?)",
-                (eid, ",".join(fl), score if isinstance(score, (int, float)) else None, hit, verdict))
+    verdict, sim, hit = assess(disp)
+    con.execute("INSERT INTO qa VALUES(?,?,?,?,?)", (eid, ",".join(fl), sim, hit, verdict))
 con.commit()
 print("verdicts:", dict(con.execute("SELECT verdict,COUNT(*) FROM qa GROUP BY verdict").fetchall()))

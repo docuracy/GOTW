@@ -42,7 +42,7 @@ def api_list():
     sel = ("e.entry_id, e.headword_disp, s.filename vol, e.page_start, length(e.text) tlen, "
            "r.action decision")
     if qa:
-        sel += ", q.flags, q.idx_score, q.idx_hit, q.verdict"
+        sel += ", q.flags, q.idx_sim, q.idx_hit, q.verdict"
         join = "LEFT JOIN qa q ON q.entry_id=e.entry_id"
         where.append("q.entry_id IS NOT NULL")
         if verdict != "all":
@@ -55,7 +55,7 @@ def api_list():
         rows = [x for x in rows if not x.get("decision")]
     elif decided == "decided":
         rows = [x for x in rows if x.get("decision")]
-    rows.sort(key=lambda x: (x.get("idx_score") if x.get("idx_score") is not None else -1, x["tlen"]))
+    rows.sort(key=lambda x: (x.get("idx_sim") if x.get("idx_sim") is not None else -1, x["tlen"]))
     return jsonify(total=len(rows), rows=rows[:1000])
 
 
@@ -74,7 +74,7 @@ def api_entry(eid):
                       (e["source_id"], e["seq"])).fetchone()
         nbr[label] = dict(r) if r else None
     if has_qa(c):
-        q = c.execute("SELECT flags, idx_score, idx_hit, verdict FROM qa WHERE entry_id=?", (eid,)).fetchone()
+        q = c.execute("SELECT flags, idx_sim, idx_hit, verdict FROM qa WHERE entry_id=?", (eid,)).fetchone()
         e["qa"] = dict(q) if q else None
     r = c.execute("SELECT action, payload FROM review WHERE entry_id=?", (eid,)).fetchone()
     e["decision"] = dict(r) if r else None
@@ -139,14 +139,14 @@ async function load(){
   count.textContent=r.total+" entries";
   items.innerHTML=r.rows.map(x=>`<div class="it ${x.decision?'done':''}" onclick="show(${x.entry_id})">
     <div class="hw">${x.headword_disp||''} ${x.decision?'· '+x.decision:''}</div>
-    <div class="meta">${x.vol.slice(5,7)} p${x.page_start??'?'} · ${x.tlen} ch · idx ${x.idx_score??'–'} · ${x.flags||''}</div></div>`).join('');
+    <div class="meta">${x.vol.slice(5,7)} p${x.page_start??'?'} · ${x.tlen} ch · idx ${x.idx_sim??'–'} · ${x.flags||''}</div></div>`).join('');
 }
 async function show(id){
   const e=await(await fetch(`/api/entry/${id}`)).json(); cur=e;
   const q=e.qa||{}, n=e.neighbors||{};
   detail.innerHTML=`<h2>${e.headword_disp} <small style="color:#888">[${e.headword_raw}]</small></h2>
    <div>${e.vol.slice(5,7)} · page ${e.page_start??'?'} · ${e.kind} · ${e.text.length} chars
-     · <span class="score">index ${q.idx_score??'–'}</span> ${q.idx_hit?('→ '+q.idx_hit):''}</div>
+     · <span class="score">index ${q.idx_sim??'–'}</span> ${q.idx_hit?('→ '+q.idx_hit):''}</div>
    <div style="margin:6px 0">${(q.flags||'').split(',').filter(Boolean).map(f=>`<span class="tag">${f}</span>`).join('')}
      ${e.decision?`<b style="color:#070">decided: ${e.decision.action}</b>`:''}</div>
    ${n.prev?`<div class="nbr"><b>↑ prev:</b> ${n.prev.headword_disp} — ${n.prev.snip}…</div>`:''}
