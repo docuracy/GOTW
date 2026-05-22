@@ -34,6 +34,50 @@ TABLE_REF = re.compile(r"\b(?:following|subjoined|annexed|above|below)\s+table\b
 PAGE_MARK = re.compile(r"^## p\. (\S+) \(#(\d+)\)")
 # Headword line: leading ALL-CAPS run (multi-word, optional (PARENTHETICAL)), then , or .
 HEAD = re.compile(r"^([A-ZÀ-Þ][A-ZÀ-Þ0-9 .'’\-]*?(?: \([^)]*\))?)\s*([,.])\s+(.+)$")
+# Standalone DISPLAY heading for a major (multi-page) entry: the whole line is an ALL-CAPS
+# headword, optionally a (PARENTHETICAL), optionally a trailing comma/period, and NOTHING else.
+# (e.g. "AF'GHANISTAN." / "AMERICA," — the description opens on the following line.)
+STANDALONE = re.compile(r"^([A-ZÀ-Þ][A-ZÀ-Þ0-9 .'’\-]*?(?: \([^)]*\))?)[,.]?$")
+# Page artifacts that interrupt entries at page breaks (never a heading; skipped when seeking prose):
+# the Google-scan watermark + library/accession stamps in this particular (ship's-library) copy.
+WATERMARK = re.compile(r"digiti[sz]ed by google|^google$|university of minnesota"
+                       r"|received on board|homeward voyage|^orders$|^landed$|^sailed$", re.I)
+# A numbered/lettered SECTION heading inside a long entry ("V. PASHALIK OF MARASH",
+# "IV. THE ETHIOPIAN RACE", "6. AFGHANISTAN, …") — never a toponym headword.
+SECTION = re.compile(r"^(?:[IVXLCDM]{1,5}|\d{1,3})\.\s")
+# False ALL-CAPS "headwords": compass bearings and roman numerals are never toponyms.
+COMPASS = {"N", "S", "E", "W", "NE", "NW", "SE", "SW", "NNE", "NNW", "SSE", "SSW",
+           "ENE", "ESE", "WNW", "WSW"}
+ROMAN = re.compile(r"^[IVXLCDM]+$")
+
+
+def _alpha(s: str) -> str:
+    return re.sub(r"[^A-Z]", "", (s or "").upper())
+
+
+def is_false_headword(hw: str) -> bool:
+    """Reject compass bearings, roman numerals, and numbered/lettered section headings."""
+    k = _alpha(hw)
+    return k in COMPASS or bool(ROMAN.fullmatch(k)) or bool(SECTION.match(hw))
+
+
+def is_heading(hw: str, current_hw: str, nextline: str, prev_complete: bool) -> bool:
+    """A standalone ALL-CAPS line opens a major entry when it (a) is alphabetically *after* the
+    current entry's headword — so the repeating running-heads (equal to the current entry) and
+    backward OCR noise are skipped; (b) follows a *completed* entry rather than interrupting one
+    mid-sentence — the running-head 'AFGHANISTAN.' that appears inside the earlier AFFENTHAL entry
+    breaks the clause '…in the circle of the | Middle Rhine…', whereas a real heading follows
+    '…Pop. 657.'; (c) is a plausible headword followed by prose."""
+    cand, cur = _alpha(hw), _alpha(current_hw)
+    if len(cand) < 4 or is_false_headword(hw):
+        return False
+    if len(hw) > 40 or len(hw.split()) > 5:         # a real heading is a name, not a sentence
+        return False
+    if cand <= cur:                                 # == current ⇒ running-head; < current ⇒ noise
+        return False
+    if not prev_complete:                           # interrupts an entry mid-sentence ⇒ running-head
+        return False
+    return bool(nextline) and not STANDALONE.match(nextline)   # must be followed by descriptive prose
 
 # Connecting particles lower-cased when not the first word of a toponym.
 PARTICLES = {
@@ -134,6 +178,8 @@ def classify(line: str):
     hw, delim, rest = m.group(1).strip(), m.group(2), m.group(3)
     if not TWO_CAPS.search(hw) or sum(c.isalpha() for c in hw) < 3:
         return None                                 # excludes initialisms like "A.M." / "S.W."
+    if is_false_headword(hw):
+        return None                                 # compass bearings (WNW) / roman numerals (XVI)
     rl = rest.lstrip()
     if delim == ".":                                # period-led head is only valid as a cross-ref
         if not re.match(r"See\b", rl):
@@ -198,21 +244,55 @@ def parse(text: str):
             cur["see_target"] = mt.group(1).strip() if mt else None
         entries.append(cur)
 
-    for page, body in pages(text):
-        for ln in body:
-            c = classify(ln)
-            if c:
-                hw, delim, rest, kind = c
-                flush()
-                headword = re.sub(r"\s*\([^)]*\)", "", hw).strip(" .,")
-                cur = {
-                    "seq": len(entries), "kind": kind, "headword": headword, "headword_raw": hw,
-                    "headword_disp": normalise_toponym(hw), "page_start": page, "_page": page,
-                    "_delim": delim, "_lines": [rest], "see_target": None,
-                }
-            elif cur is not None:
-                cur["_lines"].append(ln)
-                cur["_page"] = page if page is not None else cur["_page"]
+    # Flatten to (page, line) so a standalone display heading can look ahead for its echo line.
+    flat = [(page, ln) for page, body in pages(text) for ln in body]
+
+    def echo_line(j):
+        """First following line that is real prose, skipping page numbers / Google watermarks."""
+        while j < len(flat):
+            s = flat[j][1].strip()
+            if s and not WATERMARK.search(s) and not re.fullmatch(r"\d{1,4}", s):
+                return s
+            j += 1
+        return ""
+
+    def prev_complete():
+        """Does the current entry's text so far end a sentence? (heading vs mid-entry running-head)"""
+        if cur is None:
+            return True
+        for ln2 in reversed(cur["_lines"]):
+            t = ln2.strip()
+            if not t or WATERMARK.search(t) or re.fullmatch(r"\d{1,4}", t):
+                continue
+            return t.endswith((".", "!", "?", "”", "’"))
+        return True                                  # nothing accumulated yet
+
+    def start(hw, delim, first_line, kind, page):
+        nonlocal cur
+        flush()
+        headword = re.sub(r"\s*\([^)]*\)", "", hw).strip(" .,")
+        cur = {
+            "seq": len(entries), "kind": kind, "headword": headword, "headword_raw": hw,
+            "headword_disp": normalise_toponym(hw), "page_start": page, "_page": page,
+            "_delim": delim, "_lines": [first_line] if first_line else [], "see_target": None,
+        }
+
+    for i, (page, ln) in enumerate(flat):
+        c = classify(ln)
+        if c:
+            hw, delim, rest, kind = c
+            start(hw, delim, rest, kind, page)
+            continue
+        s = ln.strip()
+        m = STANDALONE.match(s)
+        if m and not WATERMARK.search(s):            # candidate display heading for a major entry
+            hw = m.group(1).strip(" ,.")
+            if is_heading(hw, cur["headword"] if cur else "", echo_line(i + 1), prev_complete()):
+                start(hw, ".", "", "entry", page)
+                continue
+        if cur is not None:
+            cur["_lines"].append(ln)
+            cur["_page"] = page if page is not None else cur["_page"]
     flush()
     return entries
 
