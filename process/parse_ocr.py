@@ -45,6 +45,12 @@ WATERMARK = re.compile(r"digiti[sz]ed by google|^google$|university of minnesota
 # A numbered/lettered SECTION heading inside a long entry ("V. PASHALIK OF MARASH",
 # "IV. THE ETHIOPIAN RACE", "6. AFGHANISTAN, …") — never a toponym headword.
 SECTION = re.compile(r"^(?:[IVXLCDM]{1,5}|\d{1,3})\.\s")
+# Back-matter boundary: the final volume's APPENDIX (the ancient↔modern name concordance, Articles
+# I & II) is NOT gazetteer place entries — it is handled separately by extract_appendix.py
+# (vision-LLM → name_variant table). Stop the entry parse when it begins, so its ~thousands of
+# ancient-name lines never reach the place classifier. (Guarded by entry count so the title-page
+# "…AND APPENDIX." in front-matter doesn't trip it.)
+APPENDIX_MARK = re.compile(r"^APPENDIX\.?\s*$", re.I)
 # False ALL-CAPS "headwords": compass bearings and roman numerals are never toponyms.
 COMPASS = {"N", "S", "E", "W", "NE", "NW", "SE", "SW", "NNE", "NNW", "SSE", "SSW",
            "ENE", "ESE", "WNW", "WSW"}
@@ -278,6 +284,8 @@ def parse(text: str):
         }
 
     for i, (page, ln) in enumerate(flat):
+        if len(entries) > 200 and APPENDIX_MARK.match(ln.strip()):
+            break                                    # back-matter Appendix begins — stop (see extract_appendix.py)
         c = classify(ln)
         if c:
             hw, delim, rest, kind = c
