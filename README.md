@@ -266,39 +266,41 @@ never recompute. (For reference, `process/estimate_cost.py` costs the API route:
 
 ### 4. Reconcile against WHG — `process/reconcile.py`, `process/submit_reconcile_slurm.py`
 ```bash
-python3 process/reconcile.py --seed-demo 8                      # curated demo places (no extraction)
-python3 process/reconcile.py --limit 200 --concurrency 6        # 3-pass cascade
+python3 process/reconcile.py --seed-demo 8                      # demo (no extraction needed)
+python3 process/reconcile.py --limit 200 --concurrency 24       # gateway backend (default), on CRC
+python3 process/reconcile.py --backend api --concurrency 6      # public-API fallback (needs WHG_API_TOKEN)
 python3 process/submit_reconcile_slurm.py                       # ingest + cascade as an htc CPU job
 ```
 
-A **3-pass cascade** against WHG's
-[Reconciliation API](https://docs.whgazetteer.org/content/technical/apis.html#reconciliation-service-api),
-each pass run only on the previous one's misses (precision first, then recall), thresholding on `score`:
+A **3-pass cascade**, each pass run only on the previous one's misses (precision first, then recall),
+thresholding on `score`:
 
 | Pass | `mode` | country | spatial |
 |---|---|---|---|
-| **1** exact | `exact` | `countries=[cc]` (strict) | — |
-| **2** phonetic | `phonetic` | `countries=[cc]` (strict) | — |
+| **1** exact | `exact` | strict (`ccodes=[cc]`) | — |
+| **2** phonetic | `phonetic` (Symphonym KNN) | strict | — |
 | **3** proximity | `phonetic` | dropped | `bounds` box around the **printed** coords |
 
-Matches get `whg_match_id`, `whg_score`, the pass that found them, and the WHG centroid (data-extension).
-Pass 3 lets borders/spellings change but **bounds the search spatially** — so a renamed place is found
+Pass 3 lets borders/spellings change but **bounds the search spatially** — a renamed place is found
 near its printed coordinates, never on the other side of the world (validated: *Luroe*→*Lurøy* via the
-box). Demo: **8/8** (7 exact, 1 proximity).
+box). Demo: **8/8** (7 exact, 1 proximity). Matches get `whg_match_id`, `whg_score`, the pass that found
+them, and a centroid.
 
-What the live API rewards (probed, don't re-litigate):
-- **`mode` and `bounds` are honoured server-side** — the public endpoint proxies to the **Pitt ES
-  gateway / Symphonym phonetic-KNN**, so `exact`/`phonetic` and the spatial box all run server-side. The
-  whole cascade therefore works over the public API from **CRC compute (internet)**, no VM access.
-- **Filter by `countries` (ISO), not `ccodes`/`fclasses`/`types`.** Only `countries` genuinely
-  constrains; `types`/`fclasses` are sparsely populated and would tank recall — never filter by them
-  (AAT stays enrichment-only). This is why extraction emits a present-day `country_code`.
-- **Threshold on `score`, not the conservative `match` flag.**
+**Two backends, same cascade** (`exact`/`phonetic`, country, and `bounds` are all honoured server-side;
+never filter by `types`/`fclasses` — sparsely populated, tanks recall; threshold on `score`, not the
+conservative `match`):
+- **`gateway`** (default) — POST directly to the Pitt ES gateway's `/api/reconcile` on its
+  **cluster-facing interface** `gazetteer-clus.crc.pitt.edu:9200` (`10.201.0.185`). That interface is a
+  **direct local connection from CRC compute nodes** — no firewall, **no token** — and the response
+  carries the centroid inline (`repr_point`), so there's no separate data-extension call. Fastest.
+- **`api`** — the public `https://whgazetteer.org/reconcile` (W3C-style batched `{queries}`, `countries`,
+  `.env` token, centroid via a second `extend` POST). The gateway proxies the same KNN behind it; works
+  anywhere with internet.
 
-**Transport:** reconciliation hits an external API (the API, not CRC, is the limiter), so it runs as a
-**single htc CPU `srun`** with moderate `--concurrency` — not a GPU array. The faster *direct* gateway
-(`gazetteer.crcd.pitt.edu:9200`) is firewalled to CRC login nodes only; a sysadmin request to open it to
-the compute subnet is optional (the public API already gives the full cascade).
+**Transport:** the external service — not CRC — is the limiter, so it runs as a **single htc CPU `srun`**
+with moderate `--concurrency` (not a GPU array). The gateway's *Internet*-facing interface
+(`gazetteer.crcd.pitt.edu`) is firewalled to login nodes, but its *cluster*-facing interface (above)
+reaches compute directly, so the fast path needs no firewall change.
 
 ### 5. Tables, maps, and the demo
 

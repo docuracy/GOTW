@@ -61,7 +61,7 @@ def main():
     ap.add_argument("--ingest-glob", default="llama_jsonl/llama.*.jsonl",
                     help="ingest these shard JSONLs first (relative to --repo); '' or --no-ingest to skip")
     ap.add_argument("--no-ingest", action="store_true")
-    ap.add_argument("--concurrency", type=int, default=8)
+    ap.add_argument("--concurrency", type=int, default=24)   # gateway is local/fast
     ap.add_argument("--threshold", type=float, default=80)
     ap.add_argument("--radius-km", type=float, default=150)
     ap.add_argument("--limit", type=int)
