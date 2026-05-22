@@ -37,6 +37,9 @@ LONG_THRESHOLD = 800        # entries longer than this (tokens) route to the str
 PROVIDER_MODELS = {
     "claude": ("claude-haiku-4-5", "claude-sonnet-4-6"),
     "gemini": ("gemini-2.5-flash-lite", "gemini-2.5-flash"),
+    # self-hosted on the CRC GPU cluster via vLLM; one model, no length routing
+    "qwen": (os.environ.get("QWEN_MODEL", "Qwen/Qwen3-32B"),) * 2,
+    "vllm": (os.environ.get("VLLM_MODEL", os.environ.get("QWEN_MODEL", "Qwen/Qwen3-32B")),) * 2,
 }
 MAX_TOKENS = 8192           # output cap (structured JSON per entry stays well under)
 
@@ -179,6 +182,17 @@ Field rules:
 - notes: short factual phrases that aid disambiguation or typing (industries, rivers, antiquities). Omit prose.
 - Use null / empty lists when a field is absent. Do not guess.
 
+Typing & splitting — common mistakes to avoid (pick the MOST SPECIFIC correct concept):
+- A "province / region / government / department / district of <country>" is a **political/administrative division** —
+  NOT a "parish" (a parish is religious/civil only when the text literally says "parish"/"p.").
+- A "mountain / peak / mont / ben" is a **terrestrial landform (mountain)** — never an island or a water body.
+- A "seaport / port / harbour" is a **port (settlement)**, not a generic "village" or "inhabited place".
+- Prefer the precise type the text names (town, village, market-town, commune, canton, bailiwick) over a vague
+  "inhabited place" / "political division".
+- Multi-place: EVERY "—Also …" clause is a SEPARATE record — never merge or drop one. If an entry describes a
+  place AND a distinct administrative unit of the same name (e.g. a town and its bailiwick/canton), emit BOTH.
+- country_code is the PRESENT-DAY state: do not assign micro-states (e.g. Vatican VA) to ordinary Italian towns.
+
 Getty AAT feature-type shortlist (id · label · gazetteer terms it covers):
 {_shortlist_block()}
 """
@@ -273,8 +287,49 @@ class GeminiProvider:
                            "cache_read": getattr(m, "cached_content_token_count", 0) or 0}
 
 
+class QwenProvider:
+    """Any self-hosted model behind a local vLLM OpenAI-compatible server (CRC GPU node).
+
+    Schema-guided JSON (`response_format: json_schema`) constrains the WHOLE output to the
+    Extraction schema, so the closed AAT-id enum is enforced regardless of model (Qwen,
+    Llama, gpt-oss…). Endpoint from QWEN_BASE_URL/VLLM_BASE_URL (default localhost:8000).
+
+    Thinking toggle via QWEN_THINKING: '1' enables Qwen3 <think> (needs the server started
+    with --reasoning-parser so reasoning is split out and `content` stays pure JSON), '0'
+    explicitly disables it; unset omits the kwarg entirely (correct for Llama/gpt-oss, which
+    reject enable_thinking)."""
+    name = "qwen"
+
+    def __init__(self):
+        self.base = (os.environ.get("QWEN_BASE_URL") or os.environ.get("VLLM_BASE_URL")
+                     or "http://localhost:8000/v1").rstrip("/")
+        self.key = os.environ.get("QWEN_API_KEY", "EMPTY")
+        self.think = os.environ.get("QWEN_THINKING")   # '1' | '0' | None
+
+    def generate(self, model, system, user):
+        payload = {
+            "model": model,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": user}],
+            "max_tokens": MAX_TOKENS,
+            "temperature": 0,
+            "response_format": {"type": "json_schema",
+                                "json_schema": {"name": "Extraction", "schema": SCHEMA, "strict": True}},
+        }
+        if self.think in ("0", "1"):
+            payload["chat_template_kwargs"] = {"enable_thinking": self.think == "1"}
+        req = urllib.request.Request(f"{self.base}/chat/completions", data=json.dumps(payload).encode(),
+                                     method="POST", headers={"Content-Type": "application/json",
+                                                             "Authorization": f"Bearer {self.key}"})
+        resp = json.load(urllib.request.urlopen(req, timeout=1200))
+        text = resp["choices"][0]["message"]["content"]
+        u = resp.get("usage", {})
+        return text, {"input": u.get("prompt_tokens"), "output": u.get("completion_tokens"), "cache_read": 0}
+
+
 def make_provider(name):
-    return {"claude": ClaudeProvider, "gemini": GeminiProvider}[name]()
+    return {"claude": ClaudeProvider, "gemini": GeminiProvider,
+            "qwen": QwenProvider, "vllm": QwenProvider}[name]()
 
 
 # ---------------------------------------------------------------------------
@@ -314,14 +369,44 @@ def cache_put(con, key, provider, model, entry_id, text, usage):
     con.commit()
 
 
-def pending_entries(con, limit=None):
-    sql = ("SELECT e.entry_id, e.headword_disp, e.text, e.tokens FROM entry e "
-           "WHERE e.kind='entry' AND e.text IS NOT NULL "
-           "AND NOT EXISTS (SELECT 1 FROM place p WHERE p.entry_id=e.entry_id) "
-           "ORDER BY e.entry_id")
+def pending_entries(con, limit=None, shard=0, nshards=1, skip_extracted=True):
+    where = "e.kind='entry' AND e.text IS NOT NULL"
+    if skip_extracted:    # default: only entries with no place rows yet
+        where += " AND NOT EXISTS (SELECT 1 FROM place p WHERE p.entry_id=e.entry_id)"
+    if nshards > 1:       # deterministic slice for parallel shards across GPUs
+        where += f" AND (e.entry_id % {int(nshards)}) = {int(shard)}"
+    sql = f"SELECT e.entry_id, e.headword_disp, e.text, e.tokens FROM entry e WHERE {where} ORDER BY e.entry_id"
     if limit:
         sql += f" LIMIT {int(limit)}"
     return con.execute(sql).fetchall()
+
+
+def ingest_jsonl(con, paths):
+    """Merge per-shard result JSONL files into the DB: cache + materialized place rows.
+
+    Skips any result whose entry_id is no longer in the `entry` table — so stray results from
+    dropped sources (e.g. a removed third-party transcript the run happened to cover) never
+    become orphan places."""
+    import glob as _glob
+    files = sorted(f for p in paths for f in _glob.glob(p))
+    valid = {r[0] for r in con.execute("SELECT entry_id FROM entry")}
+    n = p = skipped = 0
+    for fp in files:
+        for line in open(fp, encoding="utf-8"):
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            if rec["entry_id"] not in valid:
+                skipped += 1
+                continue
+            ext = Extraction.model_validate_json(rec["response_json"])
+            cache_put(con, rec["key"], rec["provider"], rec["model"], rec["entry_id"],
+                      rec["response_json"], rec.get("usage") or {})
+            write_places(con, rec["entry_id"], ext)
+            n += 1; p += len(ext.places)
+    print(f"ingested {n} results from {len(files)} file(s) -> {p} places"
+          f"{f' ({skipped} skipped: entry no longer present)' if skipped else ''}")
 
 
 def write_places(con, entry_id, extraction: Extraction):
@@ -395,6 +480,83 @@ def run_sync(con, rows, provider_name, override):
         n_places += len(ext.places)
         print(f"  {tag:9} entry {r['entry_id']:>6} {r['headword_disp'][:26]:26} -> {len(ext.places)} place(s)")
     print(f"done: {len(rows)} entries -> {n_places} places  ({calls} API calls, {hits} cache hits)")
+
+
+def run_concurrent(con, rows, provider_name, override, concurrency, out_jsonl=None):
+    """Saturate a (vLLM) server with `concurrency` in-flight requests; single writer.
+
+    Corpus-scale self-hosted runs. A thread pool fires blocking HTTP calls that vLLM batches
+    together; only the main thread writes, so there's no contention. Two output modes:
+      • out_jsonl: append each result as a JSON line (for a parallel SHARD on its own GPU;
+        merge later with --ingest). Resumes by skipping entry_ids already in the file.
+      • else: write straight to the DB (cache + place rows), WAL-buffered. Resumes via cache."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    jf, done_ids = None, set()
+    if out_jsonl:
+        if Path(out_jsonl).exists():
+            for line in open(out_jsonl, encoding="utf-8"):
+                try:
+                    done_ids.add(json.loads(line)["entry_id"])
+                except Exception:
+                    pass
+        jf = open(out_jsonl, "a", encoding="utf-8")
+    else:
+        con.execute("PRAGMA journal_mode=WAL"); con.execute("PRAGMA synchronous=NORMAL")
+    pending, hits, n_places, calls, fails = [], 0, 0, 0, 0
+    for r in rows:
+        model = model_for(provider_name, r["tokens"], override)
+        key = cache_key(provider_name, model, user_text(r["text"]))
+        if out_jsonl:
+            if r["entry_id"] in done_ids:
+                hits += 1; continue
+        else:
+            cached = cache_get(con, key)
+            if cached is not None:
+                write_places(con, r["entry_id"], Extraction.model_validate_json(cached)); hits += 1; continue
+        pending.append((r, model, user_text(r["text"]), key))
+    print(f"{hits} already done; {len(pending)} to extract @ concurrency {concurrency}"
+          f"{' -> ' + out_jsonl if out_jsonl else ''}", flush=True)
+    if not pending:
+        if jf: jf.close()
+        return
+    provider = make_provider(provider_name)
+
+    def work(item):
+        r, model, utext, key = item
+        for attempt in range(5):
+            try:
+                text, usage = provider.generate(model, SYSTEM_PROMPT, utext)
+                Extraction.model_validate_json(text)        # validate before returning
+                return item, text, usage, None
+            except Exception as e:
+                if attempt == 4:
+                    return item, None, None, e
+                time.sleep(min(2 ** attempt, 10))
+
+    done = 0
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        for fut in as_completed([pool.submit(work, it) for it in pending]):
+            (r, model, utext, key), text, usage, err = fut.result()
+            done += 1
+            if text is None:
+                fails += 1
+                if fails <= 8:
+                    print(f"  [fail] entry {r['entry_id']} {type(err).__name__}: {str(err)[:50]}", flush=True)
+                continue
+            if out_jsonl:
+                jf.write(json.dumps({"entry_id": r["entry_id"], "key": key, "provider": provider_name,
+                                     "model": model, "response_json": text, "usage": usage}) + "\n")
+                jf.flush(); calls += 1
+            else:
+                cache_put(con, key, provider_name, model, r["entry_id"], text, usage)
+                ext = Extraction.model_validate_json(text)
+                write_places(con, r["entry_id"], ext)
+                calls += 1; n_places += len(ext.places)
+            if done % 500 == 0:
+                print(f"  {done}/{len(pending)}  ({calls} ok, {fails} fail)", flush=True)
+    if jf:
+        jf.close()
+    print(f"done: {calls} extracted (+{hits} prior), {fails} failed (re-run to retry)")
 
 
 def run_batch_create(con, rows, provider, override):
@@ -546,7 +708,7 @@ def dry_run(con, rows, provider_name, override):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default="data/gotw.sqlite")
-    ap.add_argument("--provider", choices=["claude", "gemini"], default="claude")
+    ap.add_argument("--provider", choices=["claude", "gemini", "qwen", "vllm"], default="claude")
     ap.add_argument("--model", help="force one model for every entry (overrides length routing)")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--dry-run", action="store_true")
@@ -554,24 +716,36 @@ def main():
     ap.add_argument("--collect", metavar="BATCH_ID")
     ap.add_argument("--from-cache", action="store_true",
                     help="write place rows from cached results only (no API calls)")
+    ap.add_argument("--concurrency", type=int, default=1,
+                    help="in-flight requests for corpus-scale self-hosted runs (e.g. 48)")
+    ap.add_argument("--shard", type=int, default=0, help="this shard index (0..nshards-1)")
+    ap.add_argument("--nshards", type=int, default=1, help="number of parallel GPU shards")
+    ap.add_argument("--out-jsonl", dest="out_jsonl", help="write results to this JSONL (parallel shard)")
+    ap.add_argument("--ingest", nargs="+", metavar="GLOB", help="merge shard JSONL(s) into the DB, then exit")
     args = ap.parse_args()
 
     con = sqlite3.connect(args.db)
     con.row_factory = sqlite3.Row
     ensure_cache(con)
 
+    if args.ingest:
+        ingest_jsonl(con, args.ingest)
+        return
     if args.collect:
         run_batch_collect(con, args.collect, args.provider, args.model)
         return
     if args.from_cache:
         run_from_cache(con, args.provider, args.model)
         return
-    rows = pending_entries(con, args.limit)
-    print(f"{len(rows)} pending entries (kind='entry', not yet extracted)")
+    # for JSONL shards, take the whole slice (resume comes from the JSONL, not the place table)
+    rows = pending_entries(con, args.limit, args.shard, args.nshards, skip_extracted=not args.out_jsonl)
+    print(f"{len(rows)} entries (shard {args.shard}/{args.nshards})")
     if args.dry_run:
         dry_run(con, rows, args.provider, args.model)
     elif args.batch:
         run_batch_create(con, rows, args.provider, args.model)
+    elif args.concurrency > 1 or args.out_jsonl:
+        run_concurrent(con, rows, args.provider, args.model, max(args.concurrency, 1), args.out_jsonl)
     else:
         run_sync(con, rows, args.provider, args.model)
 

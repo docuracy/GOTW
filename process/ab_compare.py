@@ -30,7 +30,7 @@ RATES = {
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-flash":      (0.30, 2.50),
 }
-CORPUS_FILES = 7   # this volume is 1 of 7
+CORPUS_FILES = 1   # all 7 volumes are now parsed into the DB, so no ×7 extrapolation
 
 
 def norm(s):

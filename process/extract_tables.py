@@ -16,7 +16,7 @@ the candidates. Each table is stored as {subject(title), header, rows} in table_
     python3 process/extract_tables.py --pdf data/pdf/gotw-v5.pdf --page 32 --volume v5
 """
 from __future__ import annotations
-import argparse, hashlib, importlib.util, json, re, socket, sqlite3, time, urllib.request
+import argparse, base64, hashlib, importlib.util, json, os, re, socket, sqlite3, time, urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -68,34 +68,68 @@ def _dns():
             continue
 
 
-def extract(jpeg, con):
-    """Vision-LLM a single page image (jpeg bytes) -> TableSet. Cached by image hash."""
+# Backend: 'gemini' (API) or 'vllm' (self-hosted Qwen2.5-VL via OpenAI-compatible server).
+BACKEND = os.environ.get("TABLE_BACKEND", "gemini")
+VL_MODEL = os.environ.get("TABLE_VL_MODEL", "Qwen/Qwen2.5-VL-72B-Instruct-AWQ")
+VL_BASE = os.environ.get("TABLE_VL_BASE", "http://localhost:8000/v1")
+
+
+def _model_name():
+    return VL_MODEL if BACKEND == "vllm" else MODEL
+
+
+def _gen_gemini(jpeg):
     global _GENAI
-    key = hashlib.sha256(f"table\0{MODEL}\0{SIG}\0{hashlib.sha256(jpeg).hexdigest()}".encode()).hexdigest()
-    row = con.execute("SELECT response_json FROM llm_cache WHERE key=?", (key,)).fetchone()
-    if row:
-        return TableSet.model_validate_json(row[0])
     if _GENAI is None:
         _dns()
         from google import genai
         _GENAI = genai.Client()
     from google.genai import types
+    r = _GENAI.models.generate_content(
+        model=MODEL, contents=[PROMPT, types.Part.from_bytes(data=jpeg, mime_type="image/jpeg")],
+        config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=TableSet,
+            max_output_tokens=16384, thinking_config=types.ThinkingConfig(thinking_budget=0)))
+    return r.text, {"input": r.usage_metadata.prompt_token_count, "output": r.usage_metadata.candidates_token_count}
+
+
+def _gen_vllm(jpeg):
+    """Qwen2.5-VL via vLLM OpenAI-compatible chat: base64 image + schema-guided JSON."""
+    b64 = base64.b64encode(jpeg).decode()
+    body = json.dumps({
+        "model": VL_MODEL,
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": PROMPT},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]}],
+        "max_tokens": 16384, "temperature": 0,
+        "response_format": {"type": "json_schema", "json_schema": {"name": "TableSet", "schema": SCHEMA, "strict": True}},
+    }).encode()
+    req = urllib.request.Request(f"{VL_BASE.rstrip('/')}/chat/completions", data=body, method="POST",
+                                 headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"})
+    resp = json.load(urllib.request.urlopen(req, timeout=900))
+    u = resp.get("usage", {})
+    return resp["choices"][0]["message"]["content"], {"input": u.get("prompt_tokens"), "output": u.get("completion_tokens")}
+
+
+def extract(jpeg, con):
+    """Vision-LLM a single page image (jpeg bytes) -> TableSet. Cached by (model, image)."""
+    model = _model_name()
+    key = hashlib.sha256(f"table\0{model}\0{SIG}\0{hashlib.sha256(jpeg).hexdigest()}".encode()).hexdigest()
+    row = con.execute("SELECT response_json FROM llm_cache WHERE key=?", (key,)).fetchone()
+    if row:
+        return TableSet.model_validate_json(row[0])
+    gen = _gen_vllm if BACKEND == "vllm" else _gen_gemini
     for attempt in range(4):
         try:
-            r = _GENAI.models.generate_content(
-                model=MODEL, contents=[PROMPT, types.Part.from_bytes(data=jpeg, mime_type="image/jpeg")],
-                config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=TableSet,
-                    max_output_tokens=16384, thinking_config=types.ThinkingConfig(thinking_budget=0)))
-            ts = TableSet.model_validate_json(r.text)
+            text, usage = gen(jpeg)
+            ts = TableSet.model_validate_json(text)              # validate before caching
             con.execute("INSERT OR REPLACE INTO llm_cache(key,provider,model,response_json,usage_json,created_at)"
-                        " VALUES(?,?,?,?,?,?)", (key, "gemini", MODEL, r.text, json.dumps(
-                        {"input": r.usage_metadata.prompt_token_count, "output": r.usage_metadata.candidates_token_count}),
+                        " VALUES(?,?,?,?,?,?)", (key, BACKEND, model, text, json.dumps(usage),
                         datetime.now(timezone.utc).isoformat(timespec="seconds")))
             con.commit()
             return ts
         except Exception as e:
             if attempt == 3:
-                print(f"  failed: {type(e).__name__}: {str(e)[:70]}"); return None
+                print(f"  {BACKEND} failed: {type(e).__name__}: {str(e)[:70]}"); return None
             time.sleep(2 ** attempt)
 
 
@@ -173,8 +207,18 @@ def main():
     ap.add_argument("--thresh", type=int, default=5, help="min consecutive number-row run to flag a table page")
     ap.add_argument("--limit", type=int, help="cap candidates (testing)")
     ap.add_argument("--list-candidates", action="store_true", help="print candidates + scores, no API")
+    ap.add_argument("--backend", choices=["gemini", "vllm"], help="table vision backend (default env/gemini)")
+    ap.add_argument("--vl-model", help="vLLM vision model name (served-model-name)")
+    ap.add_argument("--vl-base-url", help="vLLM OpenAI-compatible base url")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+    global BACKEND, VL_MODEL, VL_BASE
+    if args.backend:
+        BACKEND = args.backend
+    if args.vl_model:
+        VL_MODEL = args.vl_model
+    if args.vl_base_url:
+        VL_BASE = args.vl_base_url
     con = sqlite3.connect(args.db)
     con.executescript("CREATE TABLE IF NOT EXISTS llm_cache (key TEXT PRIMARY KEY, provider TEXT, model TEXT,"
                       " entry_id INTEGER, response_json TEXT, usage_json TEXT, created_at TEXT);")

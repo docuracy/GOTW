@@ -3,10 +3,13 @@
 Turning a 19th-century printed gazetteer into a structured, AAT-typed, geolocated
 **authority gazetteer** for the [World Historical Gazetteer](https://whgazetteer.org/) (WHG).
 
-> **This repo doubles as a worked exemplar** for digital-humanities practitioners who
-> want to extract structured data from a historical PDF and geolocate the places it
-> names. The [Method](#the-method-reusable) section below is written to be lifted and
-> adapted; the rest documents how this project instantiates it.
+> **Scope note.** This began as a portable, locally-runnable recipe, but the working pipeline now
+> depends on **Pitt CRC infrastructure** — a GPU cluster (Slurm + vLLM) for self-hosted OCR and LLMs,
+> and WHG's own Elasticsearch gateway at Pitt for reconciliation. It is therefore **not turn-key
+> reproducible** by an outside DH researcher, and is best read as a **thoroughly-documented record** of
+> how this specific gazetteer is being digitised and ingested into WHG — and as a design reference for
+> anyone with comparable infrastructure. The *shape* of the pipeline (OCR → parse → typed LLM extraction
+> → reconciliation) generalises; the *implementation* assumes the cluster.
 
 Source: **Royal Geographical Society**, *A Gazetteer of the World, or Dictionary of Geographical
 Knowledge* (Edinburgh: A. Fullarton & Co., 1856), 7 vols. The work was published anonymously —
@@ -23,38 +26,41 @@ author**.
 
 ---
 
-## The method (reusable)
+## Pipeline overview
 
-A general recipe for *historical PDF → geolocated linked data*, with the transferable
-lesson at each step:
+The stages of *historical PDF → geolocated linked data*, and how this project does each:
 
-| Stage | What you do | Transferable lesson |
+| Stage | What it does | Approach / what we found |
 |------|-------------|---------------------|
-| **0. Get text** | OCR the page scans yourself with a **layout-aware** model. | Don't inherit someone else's OCR (licence + quality risk). Modern OCR (Surya) reads diacritics and coordinates cleanly; let it segment tables/figures, but reconstruct multi-column reading order from line geometry — layout models treat a dense column body as one block. |
-| **1. Parse to records** | Split the flow into one row per source record, keeping **provenance** (page, raw markup). | Parse defensively: the obvious delimiter lies — page breaks fall mid-record, cross-references and continuations masquerade as entries. Validate against spot-checks, not assumptions. |
-| **2. Model the target** | Decide your unit of interest and a controlled vocabulary for typing it. | Mine the *actual* data for its categories before choosing vocabulary terms; resolve them to real authority IDs (here Getty AAT) and **validate every ID** so a typo fails loudly. |
-| **3. LLM extraction** | Send each record to an LLM for structured output: the entity, its type, and the **context needed to disambiguate** it. | Use schema-constrained (structured) output, cache the shared prompt prefix, route by length to control cost, and **estimate cost up front** from a real sample. Fold OCR correction into this same pass. |
-| **4. Reconcile / geolocate** | Match each place against a gazetteer service to attach coordinates and identifiers. | Disambiguation context (containing region, neighbours, coordinates) is what makes reconciliation accurate — extract it deliberately in step 3. |
-| **5. Publish** | Export linked data; show it. | A small interactive demo (here MapLibre on GitHub Pages) communicates the result better than a data dump. |
+| **0. OCR the scans** | Self-OCR the public-domain page images with a **layout-aware** model. | No inherited OCR (licence + quality). Surya reads diacritics/coordinates cleanly; it won't split dense columns, so we reconstruct two-column reading order from line geometry. Runs as a GPU Slurm array. |
+| **1. Parse to records** | Split the flow into one row per source record, keeping **provenance** (page). | Parse defensively: entries are delimited only by the ALL-CAPS-headword print convention — cross-references and continuations masquerade as entries; validate against spot-checks. |
+| **2. Model the target** | Decide the unit of interest and a controlled vocabulary for typing it. | Mine the *actual* descriptors for their categories; resolve to real Getty AAT ids and **validate every id** so a typo fails loudly. |
+| **3. Self-hosted LLM extraction** | Run every record through **self-hosted open models** for schema-constrained structured output. | Free (no per-token cost): a **primary extractor** (Llama-3.3-70B) + a **critic** (gpt-oss-120B) + a **repair** pass (Qwen3-thinking) on the flagged minority; closed AAT enum enforced; sharded across GPUs. Chosen by a 7-model A/B ([`docs/model-comparison.md`](docs/model-comparison.md)). |
+| **4. Reconcile / geolocate** | Match each place to WHG via a **3-pass cascade** (exact → phonetic → proximity). | Disambiguation context (country, printed coordinates) drives it; precision-first then recall, with a spatial bound so border/name changes don't pull in other-side-of-the-world matches. |
+| **5. Publish** | Export linked data; show it. | A small MapLibre demo on GitHub Pages communicates the result better than a data dump. |
 
-Everything here runs on the Python standard library plus `surya-ocr`, `pymupdf`,
-`beautifulsoup4`, `lxml`, `tiktoken`, `anthropic`, and `pydantic` (see [Setup](#setup)).
-OCR runs on a GPU (we use the Pitt CRC cluster); the rest runs anywhere.
+**Infrastructure dependency.** Stages 0 and 3 require the **Pitt CRC GPU cluster** (Slurm + vLLM,
+conda envs `whg`/`vllm`, fast `/vast/ishi` storage); stage 4 queries the WHG reconciliation service.
+The lighter steps (parse, AAT build, toponym dictionary) are plain Python (`pymupdf`, `tiktoken`,
+`pydantic`, `requests`, `beautifulsoup4`/`lxml`) and run anywhere. See [Setup](#setup).
 
 ---
 
 ## This project's pipeline
 
 ```
-PD scans ──Surya OCR──▶ volume .txt ──parse──▶ entry ──toponym-check──▶ entry.text_corrected ──LLM extract──▶ place
- (vols 1–7)  (GPU/CRC)   (## p. N)                  ▲                                                       │
-                                            dict/toponyms.json                  AAT typing · multi-place split ·
-                                            (authority + Surya cross-check)      cross-ref · ethnography · context
-                                                                                                           │
-                                                              WHG Reconciliation API ──▶ coordinates ──▶ MapLibre demo
+PD scans ─Surya OCR─▶ volume.txt ─parse─▶ entry ─extract─▶ place ─reconcile─▶ WHG id + coords ─▶ MapLibre demo
+(vols 1-7) (GPU array) (## p.N)             │     Llama-3.3-70B     │      3-pass: exact → phonetic → proximity
+                                   toponym-check   (self-hosted vLLM) │      (WHG gateway via public API)
+                                   (toponyms.json) + gpt-oss critic
+                                                   + Qwen-thinking repair (flagged ~7-11%)
+                                                   AAT type · country · population · ethnonyms · multi-place
 
-v7 Appendix ──vision-LLM──▶ name_variant ──▶ dict/toponyms.json   (ancient↔modern toponym authority)
+v7 Appendix ─Qwen2.5-VL─▶ name_variant ─▶ dict/toponyms.json        tables ─Qwen2.5-VL─▶ table_data
 ```
+
+All LLM stages are **self-hosted on CRC GPUs** (vLLM) — no per-token cost. Reconciliation uses WHG's
+public reconciliation service (which proxies to the same Pitt Elasticsearch gateway).
 
 | Asset | Notes |
 |-------|-------|
@@ -68,12 +74,27 @@ Source work: the **Royal Geographical Society** (1856), public domain — see [C
 
 ### Setup
 
+The light steps (parse, AAT build, toponym dictionary, reconciliation client) are plain Python and
+run anywhere; the heavy steps need the **Pitt CRC cluster**.
+
 ```bash
-pip install anthropic google-genai beautifulsoup4 lxml tiktoken pymupdf pydantic requests
-pip install surya-ocr          # OCR stage only; needs a CUDA GPU (we run it on the Pitt CRC cluster)
-# Secrets go in .env (git-ignored): WHG_API_TOKEN, ANTHROPIC_API_KEY, GEMINI_API_KEY
-# The toponym cross-check reads a word list from dict/words or /usr/share/dict/words
+# Light steps — run anywhere:
+pip install pymupdf tiktoken pydantic requests beautifulsoup4 lxml
+
+# GPU steps — Pitt CRC, via Slurm + vLLM (conda envs on /vast/ishi):
+#   env `whg`  : surya-ocr + pymupdf            -> OCR        (process/submit_ocr_slurm.py)
+#   env `vllm` : vllm 0.10.2 + torch 2.8+cu128  -> Llama / gpt-oss / Qwen / Qwen2.5-VL
+#                (module load cuda/12.8.0 for FlashInfer JIT; VLLM_ATTENTION_BACKEND=FLASH_ATTN)
+#   self-hosted model weights + the working DB live on /vast/ishi; servers bind localhost (no tunnel)
+
+# Secrets in .env (git-ignored): WHG_API_TOKEN  (on CRC: ~/.gotw_env, chmod 600).
+#   ANTHROPIC_API_KEY / GEMINI_API_KEY are optional — only for the API providers in the model A/B.
+# The toponym cross-check reads a word list from dict/words or /usr/share/dict/words.
 ```
+
+> **Reproducibility.** Stages 0 (OCR) and 3 (extraction) assume CRC's Slurm/vLLM environment and are
+> not runnable as-is elsewhere; the `submit_*_slurm.py` scripts document exactly how they run there.
+> Reconciliation (stage 4) needs only internet + a WHG API token.
 
 ### 1. OCR the scans — `process/ocr_pages.py`
 ```bash
@@ -193,92 +214,91 @@ id** against the AAT index, so a wrong/stale id fails loudly rather than silentl
 > *per language*; the English term URI ends `-en`. Keep the `-en` one or you silently drop
 > most concepts. The dump (~59k concepts) is complete as of 2026-01 — no re-download needed.
 
-### 3. LLM extraction → `place` — `process/extract.py`
+### 3. Self-hosted LLM extraction → `place` — `process/extract.py`, `process/submit_extract_slurm.py`
 ```bash
-python3 process/extract.py --dry-run --limit 1                  # prompt + schema + a request (no key)
-python3 process/extract.py --provider gemini --limit 20         # sync (Flash-Lite/Flash)
-python3 process/extract.py --provider claude --limit 20         # sync (Haiku/Sonnet)
-python3 process/extract.py --provider claude --batch            # full corpus via Batch API (≈50% off)
-python3 process/extract.py --provider gemini --batch            # Gemini Batch Mode (≈50% off)
-python3 process/extract.py --provider <p> --collect <id>        # write results once the batch ends
+# production: shard the corpus across GPUs, each serving the model on localhost via vLLM
+python3 process/submit_extract_slurm.py --db /vast/ishi/gotw/data/gotw.sqlite --nshards 8
+python3 process/extract.py --ingest 'llama_jsonl/llama.*.jsonl' --db data/gotw.sqlite   # merge -> place rows
+# single server + concurrent client (e.g. one model on one GPU):
+QWEN_BASE_URL=http://localhost:8000/v1 python3 process/extract.py --provider vllm --model llama-3.3-70b --concurrency 48
+# the API providers remain only for the model comparison:
+python3 process/extract.py --provider claude --limit 20    # or gemini
 ```
 
-**Provider-pluggable for a cost/quality A/B.** A thin provider interface backs two implementations —
-`claude` (Haiku→short / Sonnet→long) and `gemini` (Flash-Lite→short / Flash→long) — selectable with
-`--provider`, with `--model NAME` to force one model for every entry. Keys come from `.env`
-(`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`). **Both providers support the 50%-off batch path** (Claude
-Batch API; Gemini Batch Mode, one job per routed model with the entry id carried on each request's
-`metadata`). The Gemini SDK only resolves `generativelanguage.googleapis.com`, which some networks
-fail to look up — the client auto-pins it via public DoH when local DNS can't.
+**Self-hosted and free.** Production extraction runs **open models on the CRC GPUs via vLLM** — no
+per-token cost. A thin provider interface backs `vllm` (any local OpenAI-compatible server) plus
+`claude`/`gemini` (kept only for the A/B). Schema-constrained JSON (vLLM `response_format`) enforces the
+**closed AAT-id enum** — a model can only pick a shortlist concept or `"other"`. `submit_extract_slurm.py`
+shards across GPUs (each shard serves the model on `localhost`, runs a concurrent client, writes a
+per-shard JSONL); `--ingest` merges them into `place` rows, **skipping any entry no longer in the DB**.
+Resumable + idempotent (the `llm_cache`/JSONL skip done work).
 
-**Every successful result is cached** in an `llm_cache` table, keyed by `(provider, model,
-prompt+schema signature, entry text)`. Re-runs, re-collects, and switching back to a model you've
-already used cost **zero** API calls — essential for running the A/B without burning quota. Editing
-the prompt or schema changes the signature and so re-extracts deliberately. (Verified live: a 2-entry
-Haiku run made 2 calls; the immediate re-run made 0 and served both from cache.)
+**Choosing the models — a 7-way A/B** (`process/ab_compare.py` → [`docs/model-comparison.md`](docs/model-comparison.md)).
+A deterministic sample through several configs (cache-reused, never touching `place`), scored on field
+coverage and inter-model agreement (no gold standard → agreement is a quality proxy). Findings:
+- **`country_code`** (reconciliation-critical) ~95–100% across all models.
+- **AAT typing** is the discriminating axis: **Llama-3.3-70B and Qwen3-32B-*thinking* reach 95%**
+  (matching Gemini Flash); gpt-oss-120B 86%; non-thinking Qwen / Qwen2.5-72B ~70%. Reasoning is what
+  lifts Qwen 70%→95% — but at ~80 s/entry it's too slow as a primary.
 
-Each entry yields one **structured record per place** (Pydantic-validated against a JSON
-schema): canonical name + variants, the feature type as a **Getty AAT id** (a closed enum —
-the model can only pick a shortlist concept or `"other"`), and the disambiguation context —
-country (+ present-day ISO code), administrative hierarchy, nearby places with bearing/distance,
-coordinates (DMS → decimal), population (a `[{year, count}]` time series), area, and a **`peoples`
-ethnography facet** — precise ethnonyms named in the entry (e.g. *Lumris, Numaris, Wends*), typed
-AAT 300191997 "ethnic groups". Multi-place entries split on "—Also …"; cross-references resolved
-from `see_target`. Extraction reads `entry.text_corrected` (step 1b) when present.
+So the **generate → critique → repair** design:
+- **Llama-3.3-70B = primary extractor** — fast (~8 s/entry), 95% AAT, best name extraction (Jaccard 0.97).
+- **gpt-oss-120B = critic** — sees the source entry + Llama's record and flags what looks off (wrong type,
+  historical→present-day country, a missed `—Also` place).
+- **Qwen3-32B-thinking = repair** — re-does the flagged ~7–11% with full reasoning.
+- Two independent model families concurring is the **per-record confidence signal** for the WHG ingest.
 
-Design choices that generalise:
-- **Structured output** (`output_config` json_schema) guarantees parseable, schema-valid records.
-- **Prompt caching** — the instructions + AAT shortlist + schema are a stable cached prefix;
-  only the per-entry text varies, so the big shared prefix is near-free across thousands of calls.
-- **Length-routed models** — short/standard entries → Haiku, long dense entries → Sonnet
-  (configurable at the top of `extract.py`; switch to Opus there if you prefer maximum quality).
-- **OCR correction in-pass** — even good OCR leaves some misreads (`commnne`→commune,
-  `villnge`→village, `fortres`→fortress…). The model fixes obvious garbling while it reads and
-  logs each fix to an `ocr_corrections` QA trail — no separate, extra-cost correction pass.
+**Scrutiny (`process/scrutinise.py`).** Deterministic checks run first — chiefly: a coordinate is kept
+only when the source actually printed it (`lat.`/`long.`), so the model can't supply a plausible-but-
+unstated coordinate from world knowledge (validated: it flags exactly the inferred longitudes).
 
-**Choosing a model — `process/ab_compare.py`.** Runs a deterministic sample through several
-`provider:model` configs (reusing the cache, never touching `place`) and reports cost, field
-coverage, and inter-model agreement (no gold standard, so agreement is a quality proxy), with a
-per-entry disagreement dump. On a 20-entry sample, all three models agreed **100% on `country_code`**
-(the reconciliation-critical field) and ~80–87% on AAT type and place-count; Gemini Flash-Lite came
-in ~12× cheaper than Haiku and Flash ~3× cheaper. It also caught a real quality issue — Flash-Lite
-*parroted the prompt's OCR examples* as if it had found them, inflating `ocr_corrections` — so the
-cheapest model isn't automatically the right one. (Run it yourself; results are cached, so it's free
-to re-run.) **The generated report is published at [`docs/model-comparison.md`](docs/model-comparison.md)**
-as a worked example for practitioners weighing extraction models.
+Each entry yields one **structured record per place** (Pydantic-validated): canonical name + variants;
+the feature type as a **Getty AAT id** (closed enum); and the disambiguation context — country (+ present-
+day ISO code), admin hierarchy, nearby places with bearing/distance, coordinates (DMS→decimal, *only when
+printed*), population (`[{year,count}]` series), area, and a **`peoples` ethnography facet** (ethnonyms
+like *Lumris, Numaris, Wends*, typed AAT 300191997). Multi-place entries split on "—Also …"; cross-refs
+from `see_target`. The model fixes obvious OCR garbling in-pass, logged to `ocr_corrections`.
 
-**Cost (full 7-file corpus)** — extrapolated ×7 from Volume 5 by `process/estimate_cost.py`:
-≈87,000 entries / ≈104,000 places / ≈13M input tokens → **≈ $84 via the Batch API**
-(range $72 all-Haiku … $216 all-Sonnet; ~2× for realtime). Dominated by *output* tokens;
-prompt caching makes the shared prefix negligible. ⚠️ Rates are assumed list prices — confirm
-before committing spend. Re-derive exactly once all 7 files are parsed: `SELECT SUM(tokens) FROM entry`.
+**Cost: $0 per token** — self-hosted (the spend is GPU-hours on our CRC allocation). Every result is
+cached in `llm_cache` keyed by `(provider, model, prompt+schema sig, entry text)`, so re-runs and the A/B
+never recompute. (For reference, `process/estimate_cost.py` costs the API route: the ~90k-entry /
+~104k-place corpus would be ≈$84 batched on Claude/Gemini — which the free stack avoids.)
 
-### 4. Reconcile against WHG — `process/reconcile.py`
+### 4. Reconcile against WHG — `process/reconcile.py`, `process/submit_reconcile_slurm.py`
 ```bash
-python3 process/reconcile.py --seed-demo 8   # curated demo places (no extraction needed)
-python3 process/reconcile.py --limit 50      # reconcile pending places
+python3 process/reconcile.py --seed-demo 8                      # curated demo places (no extraction)
+python3 process/reconcile.py --limit 200 --concurrency 6        # 3-pass cascade
+python3 process/submit_reconcile_slurm.py                       # ingest + cascade as an htc CPU job
 ```
 
-Geolocates each `place` via WHG's
-[Reconciliation API](https://docs.whgazetteer.org/content/technical/apis.html#reconciliation-service-api):
-it sends the extracted disambiguation context, picks the best candidate by score, fetches that
-match's centroid via a data-extension call, and writes `whg_match_id`, `whg_score`, `lat`, `lon`,
-and the full candidate JSON back to `place`. The token is read from `.env` (`WHG_API_TOKEN`).
+A **3-pass cascade** against WHG's
+[Reconciliation API](https://docs.whgazetteer.org/content/technical/apis.html#reconciliation-service-api),
+each pass run only on the previous one's misses (precision first, then recall), thresholding on `score`:
 
-What the live API actually rewards (probe before you trust the docs):
-- **Don't filter by AAT type.** `types: ["aat:…"]` returns *zero* hits — WHG isn't indexed by AAT;
-  our typing is enrichment, not a query key.
-- **Filter by country, via `countries` (ISO codes), not `fclasses` or `ccodes`.** `fclasses` is too
-  sparse to rely on; `ccodes` is accepted but doesn't actually constrain; only `countries` genuinely
-  filters. This is why extraction emits a present-day `country_code`. It's decisive: it moved
-  *Lusatia* off **Lusaka, Zambia** and *Luton* off a Devon namesake onto Bedfordshire.
-- **Threshold on `score`, not `match`** — WHG's `match` flag is conservative (a score-100 hit can be
-  `match:false`).
-- **Coords-only fallback for recall** — a country filter drops places whose WHG record lacks a country
-  code (e.g. small islands); when that happens and the gazetteer printed coordinates, retry without
-  `countries` using `lat`/`lng`/`radius`.
+| Pass | `mode` | country | spatial |
+|---|---|---|---|
+| **1** exact | `exact` | `countries=[cc]` (strict) | — |
+| **2** phonetic | `phonetic` | `countries=[cc]` (strict) | — |
+| **3** proximity | `phonetic` | dropped | `bounds` box around the **printed** coords |
 
-On the 8 curated demo places this reconciles **8/8** with correct coordinates.
+Matches get `whg_match_id`, `whg_score`, the pass that found them, and the WHG centroid (data-extension).
+Pass 3 lets borders/spellings change but **bounds the search spatially** — so a renamed place is found
+near its printed coordinates, never on the other side of the world (validated: *Luroe*→*Lurøy* via the
+box). Demo: **8/8** (7 exact, 1 proximity).
+
+What the live API rewards (probed, don't re-litigate):
+- **`mode` and `bounds` are honoured server-side** — the public endpoint proxies to the **Pitt ES
+  gateway / Symphonym phonetic-KNN**, so `exact`/`phonetic` and the spatial box all run server-side. The
+  whole cascade therefore works over the public API from **CRC compute (internet)**, no VM access.
+- **Filter by `countries` (ISO), not `ccodes`/`fclasses`/`types`.** Only `countries` genuinely
+  constrains; `types`/`fclasses` are sparsely populated and would tank recall — never filter by them
+  (AAT stays enrichment-only). This is why extraction emits a present-day `country_code`.
+- **Threshold on `score`, not the conservative `match` flag.**
+
+**Transport:** reconciliation hits an external API (the API, not CRC, is the limiter), so it runs as a
+**single htc CPU `srun`** with moderate `--concurrency` — not a GPU array. The faster *direct* gateway
+(`gazetteer.crcd.pitt.edu:9200`) is firewalled to CRC login nodes only; a sysadmin request to open it to
+the compute subnet is optional (the public API already gives the full cascade).
 
 ### 5. Tables, maps, and the demo
 
@@ -288,29 +308,29 @@ handling the offset drift (16→80) caused by ~70 unpaginated steel plates that 
 
 - **Tables — vision-LLM into `table_data`** — Surya's layout model does **not** detect these unruled
   1856 tables, and prose OCR scrambles their cells, so `process/extract_tables.py` digitises them with a
-  vision-LLM. To bound cost it first flags **candidate pages by numeric-row runs** in the column-ordered
-  OCR (a table leaves a run of consecutive number-heavy lines; prose tops out ~2, tables score 6–9), then
-  sends each candidate to the model for structured `{title, header, rows}` stored in `table_data`.
-  Validated: the *Madras* climate + districts tables digitise cleanly, and the detector flags real table
-  pages (e.g. *Barbados* meteorology + trade, run 9). Output-dominated and cached, like the Appendix.
+  **vision** model — self-hosted **Qwen2.5-VL-72B** on the cluster (`--backend vllm`, free) or Gemini
+  Flash (`--backend gemini`, ~$1.50 for the corpus). To bound cost it flags **candidate pages by
+  numeric-row runs** in the column-ordered OCR (a table leaves a run of number-heavy lines; prose tops
+  out ~2, tables score 6–9), then sends each to the model for structured `{title, header, rows}`.
+  Validated: the *Madras* climate + districts tables digitise cleanly (Qwen2.5-VL even keeps the print's
+  `·` decimals). ⚠️ Note the two vision models *disagreed on some digits* (e.g. an area `8,700` vs
+  `3,700`) — table digit accuracy is error-prone for any single model, so tables warrant the same
+  two-reader scrutiny as the prose.
 - **Maps** — `process/extract_maps.py` finds illustration plates (ink-filtering out blank/stamp pages
   and marbled endpapers) and vision-classifies them. **Volume V contains no cartographic maps**: its 8
   steel plates are all city/landscape views (Magdeburg, Malta, Melrose Abbey, Mytelene, New York Bay,
   Padua, Patras). The tool writes an illustration manifest (titles + page provenance) and would
   crop/export any genuine maps — more likely to appear in other volumes.
-- ⚠️ **Other volumes** — we hold scans of Vol V and Vol VII; the remaining five are a prerequisite for
-  table/map recovery across the corpus. Source them as the **1856 first edition = volumes 1–7** on
+- **All seven volumes acquired + OCR'd.** Source them as the **1856 first edition = volumes 1–7** on
   [HathiTrust 011407465](https://catalog.hathitrust.org/Record/011407465); the **undated 8–14 set** on
   the same record is a *different edition* (its v14 reproduces 1856 v7's Article II) and must not be
-  mixed in. Trust each PDF's actual head-word range over its number — `process/pdf_coverage.py` reports
-  it from the OCR text layer (Vol I `AAR…BRA`, Vol V `LUX…PERTHSHIRE`; the Vol VII scan lacks a text
-  layer) so you can confirm the seven tile A–Z without overlap or gap. HathiTrust 600dpi page-image
-  zips + the OCR `.txt` are bundled into a searchable per-volume PDF by `process/build_pdf.py`
-  (image + invisible OCR layer; reads HathiTrust's `## p. N` page markers); it deletes the bulky
-  `.zip`/`.txt` once the PDF is verified (`--keep` to retain).
+  mixed in. `process/pdf_coverage.py` reports each volume's head-word range so the seven tile A–Z without
+  overlap or gap. (Tables/maps recover from the 600 dpi page images directly; the searchable per-volume
+  PDF built by `process/build_pdf.py` is now mainly an archival artifact, since OCR reads the images.)
 - **MapLibre demo** — a static GitHub Pages UI plotting the extracted, reconciled places with rich
-  popups, live at [docuracy.github.io/GOTW/map.html](https://docuracy.github.io/GOTW/map.html). Built
-  from the cached Gemini 2.5 Flash set via `process/export_geojson.py` → `docs/places.geojson`.
+  popups, live at [docuracy.github.io/GOTW/map.html](https://docuracy.github.io/GOTW/map.html), built via
+  `process/export_geojson.py` → `docs/places.geojson`. (The current demo is from an early sample; it will
+  be regenerated from the full self-hosted Llama extraction + 3-pass reconciliation.)
 
 > **Looking ahead — demographic change over time.** Extraction captures population as a structured
 > `[{year, count}]` time series (the source carries population figures in ~53% of entries, often for
@@ -350,6 +370,9 @@ refinement — tallying spellings across all volumes, most-populous wins — wil
 - **Royal Geographical Society** — corporate author of the source work, *A Gazetteer of the World*
   (A. Fullarton & Co., 1856), published anonymously "edited by a Member of the Royal Geographical Society".
 - **World Historical Gazetteer** (University of Pittsburgh; Dir. Prof. Ruth Mostern) —
-  reconciliation indices and the authority-gazetteer framework.
+  reconciliation indices, the Elasticsearch gateway, and the authority-gazetteer framework.
+- **Pitt Center for Research Computing (CRC)** — the GPU cluster that hosts all OCR and LLM stages.
+- **Open models** (self-hosted via vLLM): [Surya](https://github.com/datalab-to/surya) OCR,
+  Meta **Llama-3.3-70B**, OpenAI **gpt-oss-120B**, Alibaba **Qwen3** / **Qwen2.5-VL**.
 - Place types use the Getty **Art & Architecture Thesaurus** (AAT), made available under the
   [ODC Attribution License](https://www.getty.edu/research/tools/vocabularies/license.html).
