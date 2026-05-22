@@ -85,17 +85,23 @@ ro_junk = {h for h in true_ro - ro_crossref if junk(h)}          # over-split / 
 ro_realplace = true_ro - ro_crossref - ro_junk                   # real places his transcript omits
 # his-only that LOOK like real toponyms (vowel, length) = candidate entries we may have merged away
 rh_real = {h for h in true_rh if re.search(r"[AEIOU]", h) and 4 < len(h) < 22}
-# split: is the toponym actually present in OUR OCR text? present => merge-victim we hold (CHECK);
-# absent => his edition has it but our scanned edition doesn't (not our segmentation error).
-rh_merge = {h for h in rh_real if h in normtext}
-rh_absent = rh_real - rh_merge
+# ENTRY-START context test: collect every "NAME, <lowercase descriptor>" in our OCR — a real
+# (possibly un-split) entry start, ALL-CAPS as the gazetteer prints headwords — vs a prose mention.
+starts = set()
+for m in re.finditer(r"(?:^|\n|(?<=\. )|(?<=\.\n))\s*"
+                     r"([A-ZÀ-Þ][A-ZÀ-Þ '’.\-]{1,40}?)(?: \([^)]*\))?,\s+[a-z]", ocr_text):
+    k = norm(m.group(1))
+    if len(k) >= 4:
+        starts.add(k)
+rh_merge = {h for h in rh_real if h in starts}                     # un-split entry-start => MERGE (check)
+rh_prose = {h for h in rh_real if h not in starts and h in normtext}  # only a prose mention (not ours)
+rh_absent = rh_real - rh_merge - rh_prose
 
 print(f"reference={len(his)} ours={len(ours)} exact-common={len(common)} fuzzy-variant={len(var_o)} "
       f"=> {match_pct:.1f}% matched")
 print(f"true_ours_only={len(true_ro)} [crossref={len(ro_crossref)} junk/oversplit={len(ro_junk)} "
       f"real-place-he-omits={len(ro_realplace)}]")
-print(f"true_his_only={len(true_rh)} [merge-victim-in-our-text={len(rh_merge)} "
-      f"absent-from-our-edition={len(rh_absent)}]")
-print(f"MANUAL-CHECK ~= junk({len(ro_junk)}) + merge-victim({len(rh_merge)}) = {len(ro_junk)+len(rh_merge)}")
-print("sample merge-victims:", sorted(random.sample(sorted(rh_merge), min(30, len(rh_merge)))))
-print("sample junk/oversplit:", sorted(random.sample(sorted(ro_junk), min(20, len(ro_junk)))))
+print(f"true_his_only={len(true_rh)} [MERGE(un-split start in our text)={len(rh_merge)} "
+      f"prose-mention-only={len(rh_prose)} absent-from-our-edition={len(rh_absent)}]")
+print(f"MANUAL-CHECK ~= junk({len(ro_junk)}) + merge({len(rh_merge)}) = {len(ro_junk)+len(rh_merge)}")
+print("sample MERGE:", sorted(random.sample(sorted(rh_merge), min(30, len(rh_merge)))))
