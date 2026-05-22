@@ -32,35 +32,70 @@ for m in re.finditer(r"<p>\s*([A-ZÀ-Þ][A-ZÀ-Þ0-9'’ .&-]{1,60}?(?: \([^)]*\
     if len(k) >= 3:
         his.add(k)
 
-entries = P.parse(open(sys.argv[2], encoding="utf-8").read())
-ours_kind = {}                                   # full headword (incl. parenthetical) -> kind
+ocr_text = open(sys.argv[2], encoding="utf-8").read()
+normtext = re.sub(r"[^A-Z]", "", ocr_text.upper())   # whole volume, alpha-only, for substring tests
+entries = P.parse(ocr_text)
+ours_kind, ours_text = {}, {}                    # full headword (incl. parenthetical) -> kind / text
 for e in entries:
     k = norm(e["headword_raw"])                  # headword_raw keeps the (PARENTHETICAL)
     if k:
         ours_kind.setdefault(k, e["kind"])
+        ours_text.setdefault(k, e["text"])
 ours = set(ours_kind)
 
-his_only, ours_only = his - ours, ours - his
-print(f"reference={len(his)}  ours={len(ours)}  common={len(his & ours)} "
-      f"({100*len(his & ours)/max(len(his),1):.1f}% of reference matched)")
-print(f"his-only (we may be MISSING): {len(his_only)}")
+common = his & ours
+rh, ro = his - ours, ours - his                  # residual his-only / ours-only after EXACT match
 
-# --- decompose ours-only: crossref | spelling-variant of a his headword | short fragment | OTHER ---
-his_bucket = defaultdict(list)
-for h in his:
-    his_bucket[h[:2]].append(h)
-oo_crossref = oo_variant = oo_fragment = 0
-oo_other = []
-for h in ours_only:
-    if ours_kind.get(h) == "crossref":
-        oo_crossref += 1
-    elif len(h) <= 4:
-        oo_fragment += 1
-    elif difflib.get_close_matches(h, his_bucket.get(h[:2], []), n=1, cutoff=0.84):
-        oo_variant += 1                          # close to a his headword -> OCR spelling variant
-    else:
-        oo_other.append(h)
-print(f"ours-only total={len(ours_only)}: crossref={oo_crossref} "
-      f"spelling-variant={oo_variant} fragment(<=4)={oo_fragment} OTHER={len(oo_other)}")
-print("sample OTHER (genuine spurious candidates):",
-      sorted(random.sample(oo_other, min(30, len(oo_other)))))
+# --- tighten: fuzzy bipartite match (OCR spelling variants pair up & cancel from both residuals) ---
+rh_bucket = defaultdict(list)
+for h in rh:
+    rh_bucket[h[0]].append(h)                    # bucket by FIRST char (tolerate 2nd-char OCR diffs)
+paired_h, var_o = set(), set()
+for o in sorted(ro):
+    cands = [c for c in rh_bucket.get(o[0], []) if c not in paired_h]
+    m = difflib.get_close_matches(o, cands, n=1, cutoff=0.82)
+    hit = m[0] if m else None
+    if not hit:                                  # leading-junk / truncation: one contains the other
+        for c in cands:
+            if min(len(o), len(c)) >= 6 and (o in c or c in o):
+                hit = c
+                break
+    if hit:
+        var_o.add(o)
+        paired_h.add(hit)
+# 2nd pass for first-char OCR errors: containment against ALL remaining his-only
+leftover_h = [h for h in rh if h not in paired_h]
+for o in sorted(ro - var_o):
+    for c in leftover_h:
+        if c not in paired_h and min(len(o), len(c)) >= 7 and (o in c or c in o):
+            var_o.add(o)
+            paired_h.add(c)
+            break
+true_ro = ro - var_o                             # ours-only with NO fuzzy partner in his
+true_rh = rh - paired_h                          # his-only with NO fuzzy partner in ours
+match_pct = 100 * (len(common) + len(var_o)) / max(len(his), 1)
+
+# classify the TRUE ours-only by our entry-text quality (a real place has a descriptor; junk doesn't)
+DESCR = re.compile(r"\b(a|an|the|see|or|is|in|of|on|near|chief|town|vil|river|prov)\b", re.I)
+def junk(h):
+    t = ours_text.get(h, "")
+    return len(h) <= 4 or len(t) < 35 or not DESCR.search(t[:90])
+ro_crossref = {h for h in true_ro if ours_kind.get(h) == "crossref"}
+ro_junk = {h for h in true_ro - ro_crossref if junk(h)}          # over-split / fragment / garbled
+ro_realplace = true_ro - ro_crossref - ro_junk                   # real places his transcript omits
+# his-only that LOOK like real toponyms (vowel, length) = candidate entries we may have merged away
+rh_real = {h for h in true_rh if re.search(r"[AEIOU]", h) and 4 < len(h) < 22}
+# split: is the toponym actually present in OUR OCR text? present => merge-victim we hold (CHECK);
+# absent => his edition has it but our scanned edition doesn't (not our segmentation error).
+rh_merge = {h for h in rh_real if h in normtext}
+rh_absent = rh_real - rh_merge
+
+print(f"reference={len(his)} ours={len(ours)} exact-common={len(common)} fuzzy-variant={len(var_o)} "
+      f"=> {match_pct:.1f}% matched")
+print(f"true_ours_only={len(true_ro)} [crossref={len(ro_crossref)} junk/oversplit={len(ro_junk)} "
+      f"real-place-he-omits={len(ro_realplace)}]")
+print(f"true_his_only={len(true_rh)} [merge-victim-in-our-text={len(rh_merge)} "
+      f"absent-from-our-edition={len(rh_absent)}]")
+print(f"MANUAL-CHECK ~= junk({len(ro_junk)}) + merge-victim({len(rh_merge)}) = {len(ro_junk)+len(rh_merge)}")
+print("sample merge-victims:", sorted(random.sample(sorted(rh_merge), min(30, len(rh_merge)))))
+print("sample junk/oversplit:", sorted(random.sample(sorted(ro_junk), min(20, len(ro_junk)))))
