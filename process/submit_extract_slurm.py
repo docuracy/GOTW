@@ -46,7 +46,7 @@ def build_sbatch(*, db, repo, out_dir, nshards, partition, conc, hf_model, serve
         "module load cuda/12.8.0",
         f"export HF_HOME={_HF_HOME} XDG_CACHE_HOME=/tmp/vllmcache_${{T}} VLLM_ATTENTION_BACKEND=FLASH_ATTN",
         f"cp {db} /tmp/gotw_${{T}}.sqlite",
-        f"vllm serve {hf_model} --host 127.0.0.1 --port ${{PORT}} --max-model-len 16384 \\",
+        f"vllm serve {hf_model} --host 127.0.0.1 --port ${{PORT}} --max-model-len 32768 \\",
         f"    --gpu-memory-utilization 0.92 --served-model-name {served} > {srv_log} 2>&1 &",
         "SRV=$!",
         f'echo "waiting for vLLM..."; for i in $(seq 1 150); do grep -qa "Application startup complete" {srv_log} && break; sleep 5; done',
