@@ -25,15 +25,17 @@ def norm(h):
 
 html = open(sys.argv[1], encoding="utf-8", errors="ignore").read()
 his = set()
-for m in re.finditer(r"<p>\s*([A-ZÀ-Þ][A-ZÀ-Þ0-9'’ .&-]{1,60}?)\s*[,.]", html):
+# headword = leading ALL-CAPS run + the " (PARENTHETICAL)" (e.g. ACCRINGTON (NEW)) CAPTURED as part
+# of the toponym (it distinguishes New/Old, Grande/Piccolo, Mount, …), then , or .
+for m in re.finditer(r"<p>\s*([A-ZÀ-Þ][A-ZÀ-Þ0-9'’ .&-]{1,60}?(?: \([^)]*\))?)\s*[,.]", html):
     k = norm(m.group(1))
     if len(k) >= 3:
         his.add(k)
 
 entries = P.parse(open(sys.argv[2], encoding="utf-8").read())
-ours_kind = {}                                   # headword -> kind (entry|crossref), first wins
+ours_kind = {}                                   # full headword (incl. parenthetical) -> kind
 for e in entries:
-    k = norm(e["headword"])
+    k = norm(e["headword_raw"])                  # headword_raw keeps the (PARENTHETICAL)
     if k:
         ours_kind.setdefault(k, e["kind"])
 ours = set(ours_kind)
