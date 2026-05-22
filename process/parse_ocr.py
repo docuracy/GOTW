@@ -61,10 +61,20 @@ def _alpha(s: str) -> str:
     return re.sub(r"[^A-Z]", "", (s or "").upper())
 
 
+# Strict roman-numeral validator (so genuine words made of I/V/X/L/C/D/M — MILL, DILI, CIVIL —
+# are NOT mistaken for numerals; only true numerals like VIII/XII match).
+ROMAN_STRICT = re.compile(r"^M{0,4}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$")
+
+
 def is_false_headword(hw: str) -> bool:
     """Reject compass bearings, roman numerals, and numbered/lettered section headings."""
     k = _alpha(hw)
-    return k in COMPASS or bool(ROMAN.fullmatch(k)) or bool(SECTION.match(hw))
+    if k in COMPASS or ROMAN.fullmatch(k) or SECTION.match(hw):
+        return True
+    # section heading whose roman numeral / digit lost its period ("VIII KINGDOM OF KASAN"):
+    # first token is a VALID roman numeral or a number, followed by an ALL-CAPS word.
+    m = re.match(r"^([IVXLCDM]+|\d{1,3})\.?\s+[A-ZÀ-Þ]", hw)
+    return bool(m) and (m.group(1).isdigit() or bool(ROMAN_STRICT.match(m.group(1))))
 
 
 def is_heading(hw: str, current_hw: str, nextline: str, prev_complete: bool) -> bool:
