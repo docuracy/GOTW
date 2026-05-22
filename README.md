@@ -14,7 +14,8 @@ Turning a 19th-century printed gazetteer into a structured, AAT-typed, geolocate
 Source: **Royal Geographical Society**, *A Gazetteer of the World, or Dictionary of Geographical
 Knowledge* (Edinburgh: A. Fullarton & Co., 1856), 7 vols. The work was published anonymously —
 "edited by a Member of the Royal Geographical Society" — so the **RGS is cited as the corporate
-author**.
+author**; the anonymous editor is identified as
+**[George Godfrey Cunningham](https://en.wikipedia.org/wiki/George_Godfrey_Cunningham)**.
 [archive.org/details/agazetteerworld00unkngoog](https://archive.org/details/agazetteerworld00unkngoog).
 
 > **We OCR the public-domain scans ourselves.** Rather than reuse a third-party transcript, we run
@@ -370,7 +371,8 @@ refinement — tallying spellings across all volumes, most-populous wins — wil
 ## Credits
 
 - **Royal Geographical Society** — corporate author of the source work, *A Gazetteer of the World*
-  (A. Fullarton & Co., 1856), published anonymously "edited by a Member of the Royal Geographical Society".
+  (A. Fullarton & Co., 1856), published anonymously "edited by a Member of the Royal Geographical Society"
+  — the editor being [George Godfrey Cunningham](https://en.wikipedia.org/wiki/George_Godfrey_Cunningham).
 - **World Historical Gazetteer** (University of Pittsburgh; Dir. Prof. Ruth Mostern) —
   reconciliation indices, the Elasticsearch gateway, and the authority-gazetteer framework.
 - **Pitt Center for Research Computing (CRC)** — the GPU cluster that hosts all OCR and LLM stages.

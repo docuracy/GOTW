@@ -493,12 +493,18 @@ def run_concurrent(con, rows, provider_name, override, concurrency, out_jsonl=No
     from concurrent.futures import ThreadPoolExecutor, as_completed
     jf, done_ids = None, set()
     if out_jsonl:
-        if Path(out_jsonl).exists():
-            for line in open(out_jsonl, encoding="utf-8"):
-                try:
-                    done_ids.add(json.loads(line)["entry_id"])
-                except Exception:
-                    pass
+        import glob as _glob
+        # GLOBAL resume: skip any entry already done by ANY shard (so re-sharding with a different
+        # --nshards doesn't re-extract work the previous layout already covered).
+        for sib in _glob.glob(str(Path(out_jsonl).parent / "*.jsonl")):
+            try:
+                for line in open(sib, encoding="utf-8"):
+                    try:
+                        done_ids.add(json.loads(line)["entry_id"])
+                    except Exception:
+                        pass
+            except OSError:
+                pass
         jf = open(out_jsonl, "a", encoding="utf-8")
     else:
         con.execute("PRAGMA journal_mode=WAL"); con.execute("PRAGMA synchronous=NORMAL")
