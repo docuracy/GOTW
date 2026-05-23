@@ -247,10 +247,11 @@ def pages(text: str):
         for ln in raw:
             prev = merged[-1] if merged else ""
             if prev and re.search(r"[A-Za-zÀ-ÿ]-\.?$", prev):
-                # heal only a true word-wrap (lowercase continuation) or a wrapped ALL-CAPS HEADWORD
-                # ("…CACHOE-." + "IRA…"); do NOT glue a prose hyphen onto the NEXT entry's headword.
-                allcaps = bool(re.fullmatch(r"[A-ZÀ-Þ0-9 '’.\-]+", prev.strip()))
-                if ln[:1].islower() or allcaps:
+                # heal a true word-wrap (lowercase continuation) OR a wrapped uppercase token —
+                # a headword/variant that breaks on an ALL-CAPS token+hyphen ("…CACHOE-.", "…or
+                # MEISTYRR-", "BANGOR-IS-Y-"); do NOT glue a prose hyphen onto the NEXT headword.
+                caps_wrap = bool(re.search(r"[A-ZÀ-Þ][A-ZÀ-Þ0-9'’.\-]*-\.?$", prev))
+                if ln[:1].islower() or caps_wrap:
                     merged[-1] = re.sub(r"-\.?$", "", prev) + ln.lstrip()
                     continue
             merged.append(ln)
