@@ -26,7 +26,7 @@ ENC = tiktoken.get_encoding("cl100k_base")
 # Two consecutive caps => a real headword (rejects abbreviations like "M." / "L.").
 TWO_CAPS = re.compile(r"[A-ZÀ-Þ]{2}")
 # Cross-ref tail: "… See <TARGET>."
-SEE = re.compile(r"\bSee\s+(?:also\s+)?([A-ZÀ-Þ][A-ZÀ-Þ .'()\-,&]*?)\.?\s*$")
+SEE = re.compile(r"\bSee\s+(?:also\s+)?([A-ZÀ-Þ][A-Za-zÀ-ÿ .'()\-,&]*?)\.?\s*$")
 ALSO = re.compile(r"—\s*Also\b", re.IGNORECASE)
 # Text promising a table (so extraction/QA knows a table belongs here, digitised separately).
 TABLE_REF = re.compile(r"\b(?:following|subjoined|annexed|above|below)\s+table\b"
@@ -40,7 +40,8 @@ HEAD = re.compile(r"^([A-ZÀ-Þ][A-ZÀ-Þ0-9 .'’\-]*?(?: \([^)]*\))?)\s*([,.])
 STANDALONE = re.compile(r"^([A-ZÀ-Þ][A-ZÀ-Þ0-9 .'’\-]*?(?: \([^)]*\))?)[,.]?$")
 # Page artifacts that interrupt entries at page breaks (never a heading; skipped when seeking prose):
 # the Google-scan watermark + library/accession stamps in this particular (ship's-library) copy.
-WATERMARK = re.compile(r"digiti[sz]ed by go\w+|^goo\w+$|versity of minnesota|original from"
+WATERMARK = re.compile(r"digiti[sz]ed by go\w+|^goo\w+$|original from"
+                       r"|(?:uni)?versity of min\w*|^y? ?of minnesot\w*"   # incl. OCR-split/truncated
                        r"|received on board|homeward voyage|^(orders|landed|sailed)[.,]?$", re.I)
 # Volume title-page / publisher colophon block (between volumes) — never gazetteer entries.
 COLOPHON = re.compile(r"fullarton|gazetteer of the world|dictionary of geograph|newgate street"
@@ -50,12 +51,19 @@ JUNK_RUN = re.compile(r"(.)\1{7,}")               # 8+ repeated chars, e.g. "PPP
 JUNK_DATE = re.compile(r"(?:[-–]\d{1,4}){3,}")    # corrupt repeated "-01-01-01…" groups
 
 
+# An inline running-head intruding mid-prose: a lowercase word, then an ALL-CAPS toponym + ".",
+# then a lowercase word ("oil and bone NEW ZEALAND. to chance vessels" -> "oil and bone to chance").
+INLINE_HEAD = re.compile(r"(?<=[a-zà-ÿ] )[A-ZÀ-Þ]{3,}[A-ZÀ-Þ '’\-]*\.\s+(?=[a-zà-ÿ])")
+
+
 def clean_text(s: str) -> str:
-    """Scrub inserted OCR/scan garble (stamp phrases, repeated-char runs, date corruption)."""
+    """Scrub inserted OCR/scan garble (stamp phrases, repeated-char runs, date corruption,
+    running-heads dropped mid-sentence)."""
     s = JUNK_RUN.sub(lambda m: m.group(1), s)
     s = JUNK_DATE.sub("", s)
     s = WATERMARK.sub("", s)
     s = COLOPHON.sub("", s)
+    s = INLINE_HEAD.sub("", s)
     return re.sub(r"\s{2,}", " ", s).strip()
 # A numbered/lettered SECTION heading inside a long entry ("V. PASHALIK OF MARASH",
 # "IV. THE ETHIOPIAN RACE", "6. AFGHANISTAN, …") — never a toponym headword.
@@ -221,8 +229,13 @@ def classify(line: str):
     # "ZALAD, or ZALA. See SZALAD." — comma-led, but still a cross-ref, not a place entry).
     if re.match(r"(or [^.]+\.\s*)?See\s+[A-ZÀ-Þ]", rl):
         return hw, delim, rest, "crossref"
-    if delim == ".":                                # period-led head is only valid as a cross-ref
-        return None
+    if delim == ".":
+        # variant cross-ref with "See" omitted: "X. Y." where Y is a bare ALL-CAPS toponym
+        # (TRAZ-OZ-MONTES. TRAS-OS-MONTES. / BUKKOLZ. BUCHHOLZ. / KALAVRIA. CALAUREIA.).
+        rt = rl.rstrip(" .")
+        if rt and TWO_CAPS.search(rt) and not re.search(r"[a-zà-ÿ]", rt) and sum(c.isalpha() for c in rt) >= 3:
+            return hw, delim, rest, "crossref"
+        return None                                 # period-led, otherwise not an entry
     if not rl[:1].islower():                         # a real descriptor follows the comma in lower-case
         return None
     return hw, delim, rest, "entry"
@@ -300,9 +313,13 @@ def parse(text: str):
         cur["n_tables"] = 0                          # tables digitised separately (extract_tables.py)
         cur["table_missing"] = int(bool(TABLE_REF.search(full)))
         cur["page_end"] = cur.pop("_page")
+        # a headword whose description IS just "See TARGET" (often split across OCR lines, so the
+        # headword stood alone and looked like a heading) is a cross-reference, not a place entry.
+        if cur["kind"] == "entry" and re.match(r"\s*See\s+[A-ZÀ-Þ]", body):
+            cur["kind"] = "crossref"
         if cur["kind"] == "crossref":
             mt = SEE.search(body)
-            cur["see_target"] = mt.group(1).strip() if mt else None
+            cur["see_target"] = mt.group(1).strip() if mt else (body.strip(" .") or None)
         entries.append(cur)
 
     # Flatten to (page, line) so a standalone display heading can look ahead for its echo line.
