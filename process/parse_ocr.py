@@ -245,10 +245,15 @@ def pages(text: str):
         #    and wrapped headwords ("…CACHOE-." / "IRA. See …") rejoin before we filter.
         merged = []
         for ln in raw:
-            if merged and re.search(r"[A-Za-zÀ-ÿ]-\.?$", merged[-1]):
-                merged[-1] = re.sub(r"-\.?$", "", merged[-1]) + ln.lstrip()
-            else:
-                merged.append(ln)
+            prev = merged[-1] if merged else ""
+            if prev and re.search(r"[A-Za-zÀ-ÿ]-\.?$", prev):
+                # heal only a true word-wrap (lowercase continuation) or a wrapped ALL-CAPS HEADWORD
+                # ("…CACHOE-." + "IRA…"); do NOT glue a prose hyphen onto the NEXT entry's headword.
+                allcaps = bool(re.fullmatch(r"[A-ZÀ-Þ0-9 '’.\-]+", prev.strip()))
+                if ln[:1].islower() or allcaps:
+                    merged[-1] = re.sub(r"-\.?$", "", prev) + ln.lstrip()
+                    continue
+            merged.append(ln)
         # 2) drop scan watermark / library stamp / colophon, and in-body running page numbers
         body = []
         for ln in merged:
