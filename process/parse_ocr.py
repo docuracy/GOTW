@@ -211,6 +211,13 @@ CREATE TABLE IF NOT EXISTS place (
 );
 CREATE INDEX IF NOT EXISTS idx_place_entry ON place(entry_id);
 CREATE INDEX IF NOT EXISTS idx_place_status ON place(status);
+CREATE TABLE IF NOT EXISTS back_matter (
+  id          INTEGER PRIMARY KEY,
+  source_id   INTEGER REFERENCES source(source_id),
+  kind        TEXT,                                  -- 'appendix' (concordance lists + Ethnology essay)
+  text        TEXT,                                  -- retained OCR text for later (vision concordance,
+  n_lines     INTEGER                                --  ethnonym mining); NOT classified as places
+);
 """
 
 
@@ -355,9 +362,11 @@ def parse(text: str):
             "_delim": delim, "_lines": [first_line] if first_line else [], "see_target": None,
         }
 
+    appendix_at = None
     for i, (page, ln) in enumerate(flat):
         if len(entries) > 200 and APPENDIX_MARK.match(ln.strip()):
-            break                                    # back-matter Appendix begins — stop (see extract_appendix.py)
+            appendix_at = i                          # back-matter Appendix begins — stop classifying,
+            break                                    # but RETAIN the text (see back_matter / extract_appendix.py)
         c = classify(ln)
         if c:
             hw, delim, rest, kind = c
@@ -376,10 +385,11 @@ def parse(text: str):
             cur["_lines"].append(ln)
             cur["_page"] = page if page is not None else cur["_page"]
     flush()
-    return entries
+    back_matter = "\n".join(ln for _, ln in flat[appendix_at:]) if appendix_at is not None else ""
+    return entries, back_matter
 
 
-def load(db_path: Path, src_name: str, entries):
+def load(db_path: Path, src_name: str, entries, back_matter=""):
     con = sqlite3.connect(db_path)
     con.executescript(SCHEMA)
     pgs = [e["page_start"] for e in entries if e["page_start"] is not None]
@@ -399,6 +409,10 @@ def load(db_path: Path, src_name: str, entries):
         "VALUES(:sid,:seq,:kind,:headword,:headword_raw,:headword_disp,:page_start,:page_end,"
         ":raw_html,:text,:n_tables,:n_also,:table_missing,:see_target,:tokens)",
         [{**e, "sid": sid, "raw_html": None} for e in entries])
+    con.execute("DELETE FROM back_matter WHERE source_id=?", (sid,))
+    if back_matter.strip():                          # retain the Appendix (lists + essay) for later use
+        con.execute("INSERT INTO back_matter(source_id,kind,text,n_lines) VALUES(?,?,?,?)",
+                    (sid, "appendix", back_matter, back_matter.count("\n") + 1))
     con.commit()
     return con, sid
 
@@ -413,7 +427,7 @@ def main():
     if not args.ocr.exists():
         sys.exit(f"not found: {args.ocr}")
 
-    entries = parse(args.ocr.read_text(encoding="utf-8"))
+    entries, back_matter = parse(args.ocr.read_text(encoding="utf-8"))
     n_entry = sum(1 for e in entries if e["kind"] == "entry")
     n_cross = sum(1 for e in entries if e["kind"] == "crossref")
     extra = sum(e["n_also"] for e in entries)
@@ -422,10 +436,12 @@ def main():
           f"pages {min(pgs) if pgs else '?'}–{max(pgs) if pgs else '?'} · "
           f"+{extra:,} '—Also' places · {sum(e['tokens'] for e in entries):,} tokens")
     print("  sample headwords:", ", ".join(e["headword_disp"] for e in entries[:8]))
+    if back_matter.strip():
+        print(f"  back-matter (Appendix) retained: {back_matter.count(chr(10)) + 1:,} lines")
     if args.dry_run:
         return
     src_name = f"gotw-{args.volume}-ocr.txt"
-    con, _ = load(args.db, src_name, entries)
+    con, _ = load(args.db, src_name, entries, back_matter)
     print(f"loaded -> {args.db} (source '{src_name}')")
     con.close()
 

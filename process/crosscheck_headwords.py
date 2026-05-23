@@ -34,7 +34,7 @@ for m in re.finditer(r"<p>\s*([A-ZÀ-Þ][A-ZÀ-Þ0-9'’ .&-]{1,60}?(?: \([^)]*\
 
 ocr_text = open(sys.argv[2], encoding="utf-8").read()
 normtext = re.sub(r"[^A-Z]", "", ocr_text.upper())   # whole volume, alpha-only, for substring tests
-entries = P.parse(ocr_text)
+entries, _ = P.parse(ocr_text)            # parse() now also returns retained back-matter
 ours_kind, ours_text = {}, {}                    # full headword (incl. parenthetical) -> kind / text
 for e in entries:
     k = norm(e["headword_raw"])                  # headword_raw keeps the (PARENTHETICAL)
