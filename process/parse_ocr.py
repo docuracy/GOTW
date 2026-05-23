@@ -40,8 +40,23 @@ HEAD = re.compile(r"^([A-ZÀ-Þ][A-ZÀ-Þ0-9 .'’\-]*?(?: \([^)]*\))?)\s*([,.])
 STANDALONE = re.compile(r"^([A-ZÀ-Þ][A-ZÀ-Þ0-9 .'’\-]*?(?: \([^)]*\))?)[,.]?$")
 # Page artifacts that interrupt entries at page breaks (never a heading; skipped when seeking prose):
 # the Google-scan watermark + library/accession stamps in this particular (ship's-library) copy.
-WATERMARK = re.compile(r"digiti[sz]ed by google|^google$|university of minnesota"
-                       r"|received on board|homeward voyage|^orders$|^landed$|^sailed$", re.I)
+WATERMARK = re.compile(r"digiti[sz]ed by go\w+|^goo\w+$|versity of minnesota|original from"
+                       r"|received on board|homeward voyage|^(orders|landed|sailed)[.,]?$", re.I)
+# Volume title-page / publisher colophon block (between volumes) — never gazetteer entries.
+COLOPHON = re.compile(r"fullarton|gazetteer of the world|dictionary of geograph|newgate street"
+                      r"|eustace street|leith walk|stead.?s place|\bprinters\b", re.I)
+# OCR garble to scrub from entry text (removes inserted noise; does not reinterpret real readings):
+JUNK_RUN = re.compile(r"(.)\1{7,}")               # 8+ repeated chars, e.g. "PPPPPPPP"
+JUNK_DATE = re.compile(r"(?:[-–]\d{1,4}){3,}")    # corrupt repeated "-01-01-01…" groups
+
+
+def clean_text(s: str) -> str:
+    """Scrub inserted OCR/scan garble (stamp phrases, repeated-char runs, date corruption)."""
+    s = JUNK_RUN.sub(lambda m: m.group(1), s)
+    s = JUNK_DATE.sub("", s)
+    s = WATERMARK.sub("", s)
+    s = COLOPHON.sub("", s)
+    return re.sub(r"\s{2,}", " ", s).strip()
 # A numbered/lettered SECTION heading inside a long entry ("V. PASHALIK OF MARASH",
 # "IV. THE ETHIOPIAN RACE", "6. AFGHANISTAN, …") — never a toponym headword.
 SECTION = re.compile(r"^(?:[IVXLCDM]{1,5}|\d{1,3})\.\s")
@@ -55,6 +70,11 @@ APPENDIX_MARK = re.compile(r"^APPENDIX\.?\s*$", re.I)
 COMPASS = {"N", "S", "E", "W", "NE", "NW", "SE", "SW", "NNE", "NNW", "SSE", "SSW",
            "ENE", "ESE", "WNW", "WSW"}
 ROMAN = re.compile(r"^[IVXLCDM]+$")
+# Common statistical-table column headers (in country essays) — never toponyms; reject as headwords
+# so they don't get promoted to entries and swallow the table (tables are handled by extract_tables.py).
+STOPWORDS = {"VALUE", "VALUES", "IMPORTS", "EXPORTS", "TOTAL", "TOTALS", "AMOUNT", "AMOUNTS",
+             "QUANTITY", "QUANTITIES", "NUMBER", "NUMBERS", "REVENUE", "EXPENDITURE",
+             "POPULATION", "TONS", "ARTICLES", "COMMODITIES", "DESCRIPTION"}
 
 
 def _alpha(s: str) -> str:
@@ -69,8 +89,8 @@ ROMAN_STRICT = re.compile(r"^M{0,4}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,
 def is_false_headword(hw: str) -> bool:
     """Reject compass bearings, roman numerals, and numbered/lettered section headings."""
     k = _alpha(hw)
-    if k in COMPASS or ROMAN.fullmatch(k) or SECTION.match(hw):
-        return True
+    if k in COMPASS or k in STOPWORDS or ROMAN.fullmatch(k) or SECTION.match(hw) or JUNK_RUN.search(hw):
+        return True                                 # incl. OCR garble like "PPPPPPPP…"
     # section heading whose roman numeral / digit lost its period ("VIII KINGDOM OF KASAN"):
     # first token is a VALID roman numeral or a number, followed by an ALL-CAPS word.
     m = re.match(r"^([IVXLCDM]+|\d{1,3})\.?\s+[A-ZÀ-Þ]", hw)
@@ -197,32 +217,51 @@ def classify(line: str):
     if is_false_headword(hw):
         return None                                 # compass bearings (WNW) / roman numerals (XVI)
     rl = rest.lstrip()
-    if delim == ".":                                # period-led head is only valid as a cross-ref
-        if not re.match(r"See\b", rl):
-            return None
+    # cross-reference, incl. multi-variant forms: "[, or VARIANT.] See TARGET." (e.g.
+    # "ZALAD, or ZALA. See SZALAD." — comma-led, but still a cross-ref, not a place entry).
+    if re.match(r"(or [^.]+\.\s*)?See\s+[A-ZÀ-Þ]", rl):
         return hw, delim, rest, "crossref"
+    if delim == ".":                                # period-led head is only valid as a cross-ref
+        return None
     if not rl[:1].islower():                         # a real descriptor follows the comma in lower-case
         return None
     return hw, delim, rest, "entry"
 
 
 def pages(text: str):
-    """Yield (printed_page|None, [body lines]) per page; drop markers/annotations/running head."""
+    """Yield (printed_page|None, [body lines]) per page; drop markers/annotations/running heads,
+    scan watermarks + colophon, in-body page numbers; heal hyphenated line-wraps (incl. headwords)."""
     for chunk in text.split("\f"):
         page = None
-        body = []
+        raw = []
         for ln in chunk.splitlines():
             m = PAGE_MARK.match(ln)
             if m:
                 page = int(m.group(1)) if m.group(1).isdigit() else None
                 continue
-            if ln.startswith("<!--") or not ln.strip():
+            if ln.strip() and not ln.startswith("<!--"):
+                raw.append(ln.rstrip())
+        # 1) heal end-of-line hyphenation FIRST — so split stamps ("…UNI-" / "VERSITY OF MINNESOTA")
+        #    and wrapped headwords ("…CACHOE-." / "IRA. See …") rejoin before we filter.
+        merged = []
+        for ln in raw:
+            if merged and re.search(r"[A-Za-zÀ-ÿ]-\.?$", merged[-1]):
+                merged[-1] = re.sub(r"-\.?$", "", merged[-1]) + ln.lstrip()
+            else:
+                merged.append(ln)
+        # 2) drop scan watermark / library stamp / colophon, and in-body running page numbers
+        body = []
+        for ln in merged:
+            s = ln.strip()
+            if WATERMARK.search(s) or COLOPHON.search(s):
                 continue
-            body.append(ln.rstrip())
+            if re.fullmatch(r"\d{1,4}", s) and page is not None and abs(int(s) - page) <= 1:
+                continue
+            body.append(ln)
         while body and (re.fullmatch(r"\d{1,4}", body[0].strip())
                         or (classify(body[0]) is None
                             and re.fullmatch(r"[A-ZÀ-Þ][A-ZÀ-Þ.'’\- ]{1,30}", body[0].strip()))):
-            body.pop(0)                              # running-head: bare number or lone ALL-CAPS token
+            body.pop(0)                              # leading running-head: bare number or lone ALL-CAPS
         yield page, body
 
 
@@ -248,7 +287,7 @@ def parse(text: str):
         if cur is None:
             return
         body = join_lines(cur.pop("_lines"))
-        full = (cur["headword_raw"] + cur.pop("_delim") + " " + body).strip()
+        full = clean_text((cur["headword_raw"] + cur.pop("_delim") + " " + body).strip())
         cur["text"] = full
         cur["tokens"] = len(ENC.encode(full))
         cur["n_also"] = len(ALSO.findall(full))
@@ -308,6 +347,8 @@ def parse(text: str):
             if is_heading(hw, cur["headword"] if cur else "", echo_line(i + 1), prev_complete()):
                 start(hw, ".", "", "entry", page)
                 continue
+            if cur is not None and len(_alpha(hw)) >= 3 and _alpha(hw) == _alpha(cur["headword"]):
+                continue                             # inline running-head repeating this entry's name -> drop
         if cur is not None:
             cur["_lines"].append(ln)
             cur["_page"] = page if page is not None else cur["_page"]
