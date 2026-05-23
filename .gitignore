@@ -7,6 +7,8 @@ data/gotw.sqlite
 data/gotw_seg.sqlite
 data/aat_index.pkl
 data/maps/
+docs/places.geojsonl
+docs/places.geojson
 
 # Scratch operational helpers (cluster-specific paths; reference rights-bound transcripts)
 process/_*.sh

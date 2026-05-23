@@ -389,10 +389,14 @@ handling the offset drift (16→80) caused by ~70 unpaginated steel plates that 
   mixed in. `process/pdf_coverage.py` reports each volume's head-word range so the seven tile A–Z without
   overlap or gap. (Tables/maps recover from the 600 dpi page images directly; the searchable per-volume
   PDF built by `process/build_pdf.py` is now mainly an archival artifact, since OCR reads the images.)
-- **MapLibre demo** — a static GitHub Pages UI plotting the extracted, reconciled places with rich
-  popups, live at [docuracy.github.io/GOTW/map.html](https://docuracy.github.io/GOTW/map.html), built via
-  `process/export_geojson.py` → `docs/places.geojson`. (The current demo is from an early sample; it will
-  be regenerated from the full self-hosted Llama extraction + 3-pass reconciliation.)
+- **MapLibre demo — PMTiles vector tiles** — a static GitHub Pages UI plotting the extracted, reconciled
+  places, live at [docuracy.github.io/GOTW/map.html](https://docuracy.github.io/GOTW/map.html). To scale
+  to the full corpus without shipping one huge file, `process/export_geojson.py` emits **light**
+  newline-delimited features (id/name/fclass only) + a **sharded detail store** (`docs/detail/<id%N>.json`
+  + `manifest.json`), and `process/build_tiles.sh` runs **tippecanoe** into `docs/places.pmtiles`. The map
+  reads tiles by viewport (PMTiles over HTTP range requests — no tile server), shows the **name on hover**
+  from the tile, and **fetches the full popup record on click** from the cached detail shard. (The current
+  demo is from an early sample; it will be regenerated from the full Llama extraction + 3-pass reconciliation.)
 
 > **Looking ahead — demographic change over time.** Extraction captures population as a structured
 > `[{year, count}]` time series (the source carries population figures in ~53% of entries, often for

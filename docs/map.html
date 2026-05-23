@@ -7,6 +7,7 @@
   <title>Gazetteer of the World — extracted places</title>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js"></script>
   <style>
     :root { --ink:#1a2438; --paper:#f4f1ea; --line:#d8d2c4; }
     * { box-sizing:border-box; }
@@ -34,12 +35,16 @@
     .pop ul { margin:.1rem 0 0; padding-left:1.1rem; }
     .pop .src { margin-top:.6rem; font-size:.74rem; color:#857d6c; font-style:italic; border-top:1px solid var(--line); padding-top:.4rem; }
     .pop a { color:#2a6f97; }
+    .maplibregl-popup.tip .maplibregl-popup-content { padding:.18rem .45rem; font-size:.82rem;
+      font-family:Georgia,serif; box-shadow:0 1px 5px rgba(0,0,0,.22); }
+    .maplibregl-popup.tip .maplibregl-popup-tip { display:none; }
+    .tip-name { font-weight:bold; color:var(--ink); }
   </style>
 </head>
 <body>
   <header>
     <h1>A Gazetteer of the World — extracted places</h1>
-    <span class="sub">LLM-extracted (Gemini 2.5 Flash) · geolocated via the WHG Reconciliation API</span>
+    <span class="sub">LLM-extracted (self-hosted Llama-3.3-70B) · geolocated against the World Historical Gazetteer (3-pass reconciliation)</span>
     <a href="./">← about this project</a>
   </header>
   <div class="wrap"><div id="map"></div>
@@ -88,45 +93,83 @@
     if (p.variants) h += `<dt>Also</dt><dd>${esc(p.variants)}</dd>`;
     if (p.population) h += `<dt>Population</dt><dd>${esc(p.population)}</dd>`;
     if (notes.length) h += `<dt>Notes</dt><dd><ul>${notes.map(n=>`<li>${esc(n)}</li>`).join("")}</ul></dd>`;
-    h += `</dl><p class="src">Source: Vol.&nbsp;5, p.&nbsp;${p.page ?? "—"}` +
+    h += `</dl><p class="src">Source: Vol.&nbsp;${p.vol ?? "?"}, p.&nbsp;${p.page ?? "—"}` +
          (p.headword && p.headword !== p.name ? ` (under <em>${esc(p.headword)}</em>)` : "") +
          `<br>WHG match: ${whgLink(p.whg_id)}${p.whg_score!=null?` · score ${p.whg_score}`:""}</p></div>`;
     return h;
   }
 
-  map.on("load", async () => {
-    const fc = await (await fetch("./places.geojson")).json();
-    map.addSource("places", { type: "geojson", data: fc });
-    map.addLayer({ id: "pts", type: "circle", source: "places",
-      paint: {
-        "circle-radius": ["interpolate",["linear"],["zoom"], 1,4, 6,7],
-        "circle-color": ["match",["get","fclass"],
-          "P",COLORS.P,"A",COLORS.A,"H",COLORS.H,"T",COLORS.T,"S",COLORS.S,"X",COLORS.X, "#777"],
-        "circle-stroke-width": 1, "circle-stroke-color": "#fff", "circle-opacity": .9
-      }});
+  // ── Data source: PMTiles vector tiles ─────────────────────────────────────────
+  // Tiles are LIGHT (id/name/fclass only) so the map paints fast and scales to the whole corpus; the
+  // full popup record is fetched lazily from a sharded detail store on click. Built by
+  // process/build_tiles.sh, served statically (GitHub Pages handles the byte-range requests PMTiles needs).
+  const SRC = { url: "./places.pmtiles", layer: "places", detail: "./detail" };
 
-    // fit to data
-    const b = new maplibregl.LngLatBounds();
-    fc.features.forEach(f => b.extend(f.geometry.coordinates));
-    if (!b.isEmpty()) map.fitBounds(b, { padding: 60, maxZoom: 6 });
+  const PAINT = {
+    "circle-radius": ["interpolate",["linear"],["zoom"], 1,4, 6,7],
+    "circle-color": ["match",["get","fclass"],
+      "P",COLORS.P,"A",COLORS.A,"H",COLORS.H,"T",COLORS.T,"S",COLORS.S,"X",COLORS.X, "#777"],
+    "circle-stroke-width": 1, "circle-stroke-color": "#fff", "circle-opacity": .9
+  };
 
-    map.on("click", "pts", e => {
-      const f = e.features[0];
-      new maplibregl.Popup({ maxWidth: "320px" })
-        .setLngLat(f.geometry.coordinates).setHTML(popupHTML(f.properties)).addTo(map);
+  // Popup detail is fetched lazily by place id from sharded JSON; shards (and whole-shard fetches) are
+  // cached, so clicking neighbouring places reuses one request. The manifest gives the shard count.
+  let _shards = null, _manifest = null;
+  const _shardCache = new Map();
+  async function shardCount() {
+    if (_manifest == null) _manifest = fetch(`${SRC.detail}/manifest.json`).then(r => r.json());
+    return (_shards ??= (await _manifest).shards);
+  }
+  async function getDetail(id) {
+    const n = await shardCount();
+    const b = ((id % n) + n) % n;
+    if (!_shardCache.has(b)) _shardCache.set(b, fetch(`${SRC.detail}/${b}.json`).then(r => r.json()));
+    return { ...(await _shardCache.get(b))[id], id };
+  }
+
+  function addPointLayer() {
+    map.addLayer({ id: "pts", type: "circle", source: "places", "source-layer": SRC.layer, paint: PAINT });
+    map.on("click", "pts", async e => {
+      const p = e.features[0].properties;
+      const at = e.features[0].geometry?.coordinates?.slice ? e.features[0].geometry.coordinates : e.lngLat;
+      const popup = new maplibregl.Popup({ maxWidth: "320px" }).setLngLat(at).addTo(map);
+      popup.setHTML(`<div class="pop"><h3>${esc(p.name || "")}</h3><p class="meta">loading…</p></div>`);
+      try { popup.setHTML(popupHTML(await getDetail(p.id))); }
+      catch { popup.setHTML(`<div class="pop"><h3>${esc(p.name || "")}</h3><p class="meta">detail unavailable</p></div>`); }
     });
-    map.on("mouseenter", "pts", () => map.getCanvas().style.cursor = "pointer");
-    map.on("mouseleave", "pts", () => map.getCanvas().style.cursor = "");
+    // Hover -> name tooltip, straight from the light tile (no fetch); click -> fetch full detail.
+    const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 8, className: "tip" });
+    map.on("mousemove", "pts", e => {
+      map.getCanvas().style.cursor = "pointer";
+      const f = e.features[0];
+      const at = f.geometry?.coordinates?.slice ? f.geometry.coordinates : e.lngLat;
+      tip.setLngLat(at).setHTML(`<span class="tip-name">${esc(f.properties.name || "")}</span>`).addTo(map);
+    });
+    map.on("mouseleave", "pts", () => { map.getCanvas().style.cursor = ""; tip.remove(); });
+  }
 
-    // legend (only classes present)
-    const present = [...new Set(fc.features.map(f => f.properties.fclass))];
+  function fillLegend(count) {  // tiles can't be enumerated client-side -> show all classes
     const leg = document.getElementById("legend");
-    ["P","A","H","T","S","X"].filter(k => present.includes(k)).forEach(k => {
+    ["P","A","H","T","S","X"].forEach(k => {
       leg.insertAdjacentHTML("beforeend",
         `<div><span class="dot" style="background:${COLORS[k]}"></span>${LABELS[k]}</div>`);
     });
-    leg.insertAdjacentHTML("beforeend",
-      `<div style="margin-top:.35rem;color:#857d6c">${fc.features.length} places</div>`);
+    if (count != null) leg.insertAdjacentHTML("beforeend",
+      `<div style="margin-top:.35rem;color:#857d6c">${count.toLocaleString()} places</div>`);
+  }
+
+  map.on("load", async () => {
+    const protocol = new pmtiles.Protocol();
+    maplibregl.addProtocol("pmtiles", protocol.tile);
+    const pm = new pmtiles.PMTiles(SRC.url);
+    protocol.add(pm);
+    map.addSource("places", { type: "vector", url: "pmtiles://" + SRC.url });
+    addPointLayer();
+    const h = await pm.getHeader();          // tile bounds -> fit
+    map.fitBounds([[h.minLon, h.minLat], [h.maxLon, h.maxLat]], { padding: 60, maxZoom: 6 });
+    let count = null;
+    try { count = (await pm.getMetadata())?.tilestats?.layers?.[0]?.count ?? null; } catch {}
+    fillLegend(count);
   });
   </script>
 </body>
