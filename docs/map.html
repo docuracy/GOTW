@@ -105,11 +105,24 @@
   // process/build_tiles.sh, served statically (GitHub Pages handles the byte-range requests PMTiles needs).
   const SRC = { url: "./places.pmtiles", layer: "places", detail: "./detail" };
 
+  // Circles fade IN as the heatmap fades OUT (cross-fade across z5–7).
   const PAINT = {
-    "circle-radius": ["interpolate",["linear"],["zoom"], 1,4, 6,7],
+    "circle-radius": ["interpolate",["linear"],["zoom"], 4,3, 10,7],
     "circle-color": ["match",["get","fclass"],
       "P",COLORS.P,"A",COLORS.A,"H",COLORS.H,"T",COLORS.T,"S",COLORS.S,"X",COLORS.X, "#777"],
-    "circle-stroke-width": 1, "circle-stroke-color": "#fff", "circle-opacity": .9
+    "circle-stroke-width": 1, "circle-stroke-color": "#fff",
+    "circle-opacity": ["interpolate",["linear"],["zoom"], 5,0, 7,.9],
+    "circle-stroke-opacity": ["interpolate",["linear"],["zoom"], 5,0, 7,.9]
+  };
+  // Density heatmap for low zooms, weighted by the cluster point_count baked in by tippecanoe
+  // (coalesce -> 1 for unclustered points). Fades out by ~z7.5 as the circles take over.
+  const HEAT = {
+    "heatmap-weight": ["interpolate",["linear"],["coalesce",["get","point_count"],1], 1,.15, 80,1],
+    "heatmap-intensity": ["interpolate",["linear"],["zoom"], 0,.7, 7,1.6],
+    "heatmap-radius": ["interpolate",["linear"],["zoom"], 0,7, 7,26],
+    "heatmap-opacity": ["interpolate",["linear"],["zoom"], 5,.85, 7.5,0],
+    "heatmap-color": ["interpolate",["linear"],["heatmap-density"],
+      0,"rgba(0,0,0,0)", .2,"#9ec9e2", .45,"#4a90c2", .65,"#c9a14a", .82,"#c2683f", 1,"#a3322a"]
   };
 
   // Popup detail is fetched lazily by place id from sharded JSON; shards (and whole-shard fetches) are
@@ -127,8 +140,12 @@
     return { ...(await _shardCache.get(b))[id], id };
   }
 
-  function addPointLayer() {
-    map.addLayer({ id: "pts", type: "circle", source: "places", "source-layer": SRC.layer, paint: PAINT });
+  function addLayers() {
+    map.addLayer({ id: "heat", type: "heatmap", source: "places", "source-layer": SRC.layer, maxzoom: 8, paint: HEAT });
+    // Circles only for INDIVIDUAL places (cluster leaders carry point_count and feed only the heatmap),
+    // so a click always resolves to one real place; dense areas stay heatmap until you zoom in enough.
+    map.addLayer({ id: "pts", type: "circle", source: "places", "source-layer": SRC.layer,
+      minzoom: 5, filter: ["!", ["has", "point_count"]], paint: PAINT });
     map.on("click", "pts", async e => {
       const p = e.features[0].properties;
       const at = e.features[0].geometry?.coordinates?.slice ? e.features[0].geometry.coordinates : e.lngLat;
@@ -164,7 +181,7 @@
     const pm = new pmtiles.PMTiles(SRC.url);
     protocol.add(pm);
     map.addSource("places", { type: "vector", url: "pmtiles://" + SRC.url });
-    addPointLayer();
+    addLayers();
     const h = await pm.getHeader();          // tile bounds -> fit
     map.fitBounds([[h.minLon, h.minLat], [h.maxLon, h.maxLat]], { padding: 60, maxZoom: 6 });
     let count = null;

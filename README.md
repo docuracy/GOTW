@@ -394,9 +394,12 @@ handling the offset drift (16→80) caused by ~70 unpaginated steel plates that 
   to the full corpus without shipping one huge file, `process/export_geojson.py` emits **light**
   newline-delimited features (id/name/fclass only) + a **sharded detail store** (`docs/detail/<id%N>.json`
   + `manifest.json`), and `process/build_tiles.sh` runs **tippecanoe** into `docs/places.pmtiles`. The map
-  reads tiles by viewport (PMTiles over HTTP range requests — no tile server), shows the **name on hover**
-  from the tile, and **fetches the full popup record on click** from the cached detail shard. (The current
-  demo is from an early sample; it will be regenerated from the full Llama extraction + 3-pass reconciliation.)
+  reads tiles by viewport (PMTiles over HTTP range requests — no tile server). At **low zoom it draws a
+  density heatmap** (tippecanoe `--cluster-distance … -r1` bakes a `point_count` per low-zoom feature, which
+  weights the heatmap and keeps tiles light); this **cross-fades to individually clickable circles** as you
+  zoom in. Hover shows the **name** straight from the tile; **click fetches the full popup record** from the
+  cached detail shard. (The current demo is an early sample; it will be regenerated from the full Llama
+  extraction + 3-pass reconciliation.)
 
 > **Looking ahead — demographic change over time.** Extraction captures population as a structured
 > `[{year, count}]` time series (the source carries population figures in ~53% of entries, often for
