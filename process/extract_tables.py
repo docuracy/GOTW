@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 MODEL = "gemini-2.5-flash"
 IMG_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
-HEAD = re.compile(r"^## p\. (\S+) \(#(\d+)\)")
+HEAD = re.compile(r"## p\. (\S+) \(#(\d+)\)")   # not ^-anchored: \f-split chunks start with "\n"
 
 
 class Table(BaseModel):
@@ -155,6 +155,22 @@ def run_score(text: str) -> int:
     return best
 
 
+TABLE_NOTE = re.compile(r"<!-- table bbox=(\[[^\]]*\]) -->")
+
+
+def table_bboxes(text: str):
+    """Table-region bboxes recorded at OCR time (process/ocr_pages.py) for this page. Since OCR now
+    routes table cells OUT of the body text, these annotations — not text numeric-runs — are the
+    reliable signal for which pages carry tables (Surya's ruled tables + the unruled-table runs)."""
+    out = []
+    for m in TABLE_NOTE.finditer(text):
+        try:
+            out.append([float(v) for v in json.loads(m.group(1))])
+        except Exception:
+            pass
+    return out
+
+
 def parse_ocr(path: str):
     """Yield (printed_page|None, image_index, text) per page from a merged OCR .txt."""
     for chunk in Path(path).read_text(encoding="utf-8").split("\f"):
@@ -167,8 +183,12 @@ def parse_ocr(path: str):
 
 # ── storage ──────────────────────────────────────────────────────────────────
 def ensure_schema(con):
+    con.execute("""CREATE TABLE IF NOT EXISTS table_data(
+        id INTEGER PRIMARY KEY, entry_id INTEGER, table_no INTEGER, headword TEXT, page_start INTEGER,
+        n_rows INTEGER, n_cols INTEGER, subject TEXT, header TEXT, rows TEXT, created_at TEXT,
+        volume TEXT, source TEXT DEFAULT 'html')""")
     cols = {r[1] for r in con.execute("PRAGMA table_info(table_data)")}
-    if "volume" not in cols:
+    if "volume" not in cols:                          # legacy DBs predate these columns
         con.execute("ALTER TABLE table_data ADD COLUMN volume TEXT")
     if "source" not in cols:
         con.execute("ALTER TABLE table_data ADD COLUMN source TEXT DEFAULT 'html'")
@@ -204,7 +224,7 @@ def main():
     ap.add_argument("--ocr", help="merged OCR .txt for candidate detection (with --img-dir)")
     ap.add_argument("--pdf", help="PDF source for single-page --page mode")
     ap.add_argument("--page", type=int, help="single printed page (uses --pdf)")
-    ap.add_argument("--thresh", type=int, default=5, help="min consecutive number-row run to flag a table page")
+    ap.add_argument("--thresh", type=int, default=1, help="min table-bbox annotations to flag a table page")
     ap.add_argument("--limit", type=int, help="cap candidates (testing)")
     ap.add_argument("--list-candidates", action="store_true", help="print candidates + scores, no API")
     ap.add_argument("--backend", choices=["gemini", "vllm"], help="table vision backend (default env/gemini)")
@@ -242,12 +262,12 @@ def main():
             store(con, ts, volume=args.volume, page=args.page); show(ts)
         return
 
-    # ── corpus: candidates from OCR text, images from --img-dir ──
+    # ── corpus: candidate pages = those with table-bbox annotations recorded at OCR time ──
     if not args.img_dir or not args.ocr:
         ap.error("corpus mode needs --img-dir and --ocr (or use --page with --pdf)")
     files = sorted(p for p in Path(args.img_dir).iterdir() if p.suffix.lower() in IMG_EXTS)
-    cands = [(p, i, run_score(t)) for p, i, t in parse_ocr(args.ocr)]
-    cands = [(p, i, s) for p, i, s in cands if s >= args.thresh]
+    cands = [(p, i, len(table_bboxes(t))) for p, i, t in parse_ocr(args.ocr)]
+    cands = [(p, i, s) for p, i, s in cands if s >= args.thresh]   # >=1 table region on the page
     cands.sort(key=lambda x: -x[2])
     if args.limit:
         cands = cands[:args.limit]
