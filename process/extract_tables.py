@@ -19,7 +19,7 @@ from __future__ import annotations
 import argparse, base64, hashlib, importlib.util, json, os, re, socket, sqlite3, time, urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Literal
 from pydantic import BaseModel
 
 MODEL = "gemini-2.5-flash"
@@ -27,27 +27,44 @@ IMG_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
 HEAD = re.compile(r"## p\. (\S+) \(#(\d+)\)")   # not ^-anchored: \f-split chunks start with "\n"
 
 
+class Column(BaseModel):
+    label: str                            # the column heading as printed
+    group: Optional[str]                  # spanning super-heading, e.g. "Population" over "1831"/"1841"
+    unit: Optional[str]                   # "£", "acres", "miles", "persons", … else null
+    type: Literal["place", "year", "number", "text"]   # 'place' = the reconcilable row-label column
+
+
 class Table(BaseModel):
-    title: Optional[str]      # caption / what the table is about
-    header: List[str]         # column labels (top row)
-    rows: List[List[str]]     # body rows, cells as printed
+    title: Optional[str]                  # caption / subject of the table
+    columns: List[Column]                 # one per column, left-to-right (data-first; render to HTML client-side)
+    rows: List[List[str]]                 # body rows, one cell per column, exactly as printed
+    source_note: Optional[str]            # attribution in the caption, e.g. "[Vigne]" / "[King]"
+    footnotes: List[str]                  # footnotes / caveats, else []
 
 
 class TableSet(BaseModel):
-    tables: List[Table]       # every statistical table on the page (empty if none)
+    tables: List[Table]                   # every statistical table on the page (empty if none)
 
 
-TableSet.model_rebuild()
+for _m in (Column, Table, TableSet):   # `from __future__ annotations` defers — rebuild each
+    _m.model_rebuild()
 SCHEMA = TableSet.model_json_schema()
 for _n in (SCHEMA, *SCHEMA.get("$defs", {}).values()):
     if _n.get("type") == "object":
         _n["additionalProperties"] = False
 
-PROMPT = ("This is a scanned page from a 19th-century gazetteer. Transcribe EVERY statistical table on "
-          "the page (ignore running prose). For each table give: title (the caption or subject, else null); "
-          "header (the column labels); rows (each body row as a list of cells, exactly as printed, keeping "
-          "blank cells as empty strings). Correct obvious OCR digit/letter errors. If the page has no "
-          "table, return an empty list.")
+PROMPT = ("This is a scanned page from a 19th-century gazetteer. Transcribe EVERY statistical table on the "
+          "page (ignore running prose). For each table return:\n"
+          "- title: the caption or subject of the table (else null);\n"
+          "- columns: one entry per column, left-to-right, each {label (the column heading as printed); "
+          "group (a spanning super-heading above this column, e.g. 'Population' over sub-columns '1831'/'1841', "
+          "else null); unit (e.g. '£', 'acres', 'miles', 'persons', else null); type (one of: 'place' for the "
+          "column of place-names that labels each row; 'year'; 'number'; 'text')};\n"
+          "- rows: each body row as a list of cells, ONE cell per column in column order, exactly as printed, "
+          "blank cells as empty strings;\n"
+          "- source_note: any attribution in the caption, e.g. '[Vigne]' / '[King]' (else null);\n"
+          "- footnotes: any footnotes or caveats below the table (else []).\n"
+          "Correct obvious OCR digit/letter errors. If the page has no table, return an empty list.")
 SIG = hashlib.sha256((PROMPT + json.dumps(SCHEMA, sort_keys=True)).encode()).hexdigest()[:12]
 _GENAI = None
 
@@ -183,15 +200,17 @@ def parse_ocr(path: str):
 
 # ── storage ──────────────────────────────────────────────────────────────────
 def ensure_schema(con):
+    # Data-first storage: `columns` is the JSON column-spec ({label,group,unit,type}), `rows` the cells.
+    # HTML is rendered from this client-side — never stored. `header` is retained for legacy rows only.
     con.execute("""CREATE TABLE IF NOT EXISTS table_data(
         id INTEGER PRIMARY KEY, entry_id INTEGER, table_no INTEGER, headword TEXT, page_start INTEGER,
-        n_rows INTEGER, n_cols INTEGER, subject TEXT, header TEXT, rows TEXT, created_at TEXT,
-        volume TEXT, source TEXT DEFAULT 'html')""")
+        n_rows INTEGER, n_cols INTEGER, subject TEXT, header TEXT, columns TEXT, rows TEXT,
+        source_note TEXT, footnotes TEXT, created_at TEXT, volume TEXT, source TEXT DEFAULT 'html')""")
     cols = {r[1] for r in con.execute("PRAGMA table_info(table_data)")}
-    if "volume" not in cols:                          # legacy DBs predate these columns
-        con.execute("ALTER TABLE table_data ADD COLUMN volume TEXT")
-    if "source" not in cols:
-        con.execute("ALTER TABLE table_data ADD COLUMN source TEXT DEFAULT 'html'")
+    for c, d in (("volume", "TEXT"), ("source", "TEXT DEFAULT 'html'"),   # legacy DBs predate these
+                 ("columns", "TEXT"), ("source_note", "TEXT"), ("footnotes", "TEXT")):
+        if c not in cols:
+            con.execute(f"ALTER TABLE table_data ADD COLUMN {c} {d}")
     con.commit()
 
 
@@ -200,19 +219,28 @@ def store(con, ts, *, volume, page, headword=None, entry_id=None):
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     con.execute("DELETE FROM table_data WHERE source='vision' AND volume=? AND page_start IS ?", (volume, page))
     for i, t in enumerate(ts.tables, 1):
+        cols_json = json.dumps([c.model_dump() for c in t.columns], ensure_ascii=False)
+        labels_json = json.dumps([c.label for c in t.columns], ensure_ascii=False)   # legacy `header`
         con.execute("INSERT INTO table_data(entry_id,table_no,headword,page_start,n_rows,n_cols,subject,"
-                    "header,rows,created_at,volume,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,'vision')",
-                    (entry_id, i, headword, page, len(t.rows), len(t.header), t.title,
-                     json.dumps(t.header, ensure_ascii=False), json.dumps(t.rows, ensure_ascii=False), now, volume))
+                    "header,columns,rows,source_note,footnotes,created_at,volume,source) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'vision')",
+                    (entry_id, i, headword, page, len(t.rows), len(t.columns), t.title,
+                     labels_json, cols_json, json.dumps(t.rows, ensure_ascii=False),
+                     t.source_note, json.dumps(t.footnotes, ensure_ascii=False), now, volume))
     con.commit()
 
 
 def show(ts):
     print(f"  -> {len(ts.tables)} table(s)")
     for t in ts.tables:
-        print(f"     title: {t.title} | header: {t.header} | {len(t.rows)} rows")
+        cols = " | ".join((f"{c.group}/" if c.group else "") + c.label + (f" ({c.unit})" if c.unit else "")
+                          + f" [{c.type}]" for c in t.columns)
+        print(f"     title: {t.title} | {len(t.rows)} rows" + (f" | src: {t.source_note}" if t.source_note else ""))
+        print(f"     cols: {cols}")
         for r in t.rows[:3]:
             print(f"       {r}")
+        if t.footnotes:
+            print(f"     notes: {t.footnotes}")
 
 
 # ── main ─────────────────────────────────────────────────────────────────────

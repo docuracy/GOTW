@@ -18,6 +18,8 @@ author**; the anonymous editor is identified as
 **[George Godfrey Cunningham](https://en.wikipedia.org/wiki/George_Godfrey_Cunningham)**.
 [archive.org/details/agazetteerworld00unkngoog](https://archive.org/details/agazetteerworld00unkngoog).
 
+![img.png](img.png)
+
 > **We OCR the public-domain scans ourselves.** Rather than reuse a third-party transcript, we run
 > the **1856 first-edition page images (HathiTrust vols 1–7)** through a modern layout-aware OCR model
 > ([Surya](https://github.com/datalab-to/surya)) on a GPU cluster — fully public-domain, no licence
@@ -67,7 +69,8 @@ public reconciliation service (which proxies to the same Pitt Elasticsearch gate
 |-------|-------|
 | `data/pdf/gotw-v{1..7}.pdf` | Per-volume public-domain scans, built from HathiTrust 600dpi images by `build_pdf.py`. The OCR input. Git-ignored; rebuild from source. |
 | `data/txt/ocr/v{N}/p*.txt`, `data/txt/gotw-v{N}-ocr.txt` | Our **Surya OCR** output — one resumable file per page, merged per volume (`## p. N` markers). Produced by `ocr_pages.py`. Git-ignored. |
-| `data/gotw.sqlite` | Working store (entry, place, table_data, name_variant, corrections, llm_cache…). Git-ignored; rebuild from source. |
+| `data/gotw_seg.sqlite` | Working store from the table-aware re-OCR (entry, place, table_data, back_matter, name_variant, qa, vlm_qa, llm_cache…). Git-ignored; rebuild from source. (Supersedes the earlier `data/gotw.sqlite`.) |
+| `data/review.sqlite` | Signature-keyed human-review decision sidecar (survives re-parses/DB rebuilds). |
 | `data/aat_shortlist.json` | 47 validated Getty AAT feature-type concepts (committed). |
 | `dict/toponyms.json` | 27,528-toponym authority built from the Vol VII Appendix (committed). |
 
@@ -113,12 +116,22 @@ coordinate glyphs (*S lat. 37° 10′*), and correct two-column reading order, a
 layout + 3.5 s detect+recognise).
 
 What generalises:
-- **Layout segmentation has limits.** Surya's `LayoutPredictor` reliably finds **tables and figures**
-  — we route those to [`extract_tables.py`](#5-tables-maps-and-the-demo)/`extract_maps.py` and exclude
-  them from the prose — but it treats the dense two-column body as a *single* text block; it will
-  **not** split the columns. So we reconstruct **two-column reading order from the recognised line-box
-  geometry** (left column top-to-bottom, then right). The page marker (`## p. N`) is read from the
-  running-head number in the top margin.
+- **Layout segmentation has limits.** Surya's `LayoutPredictor` reliably finds **ruled tables and
+  figures** — we route those to [`extract_tables.py`](#5-tables-maps-and-the-demo)/`extract_maps.py`
+  and exclude them from the prose — but it treats the dense two-column body as a *single* text block; it
+  will **not** split the columns. So we reconstruct **two-column reading order from the recognised
+  line-box geometry** (left column top-to-bottom, then right). The page marker (`## p. N`) is read from
+  the running-head number in the top margin.
+- **Unruled statistical tables — detected at OCR, routed out of the prose.** The 1856 stat tables have
+  **no ruling lines**, so the layout model misses them and plain OCR linearises their cells into
+  scrambled numbers that pollute the surrounding entry (a problem we hit in the long country essays —
+  *France*, *Egypt*, *Sardinia*). *(We considered keying off the page's vertical column-separator rule,
+  which the regular two-column pages all carry — but tables also occur **inside** a separated column, so
+  the rule isn't a clean table signal.)* What works is **digit density**: `ocr_pages.py` finds runs of
+  high-digit-fraction line-boxes (≥4 lines, ≥40% numeric, bridging ≤2 non-numeric lines), per-column
+  **and** full-width, and routes those regions **out** of the reading-order text, recording a
+  `<!-- table bbox=… -->` marker per run. The prose stream stays clean; the boxed regions are digitised
+  separately by the [table pass](#5-tables-maps-and-the-demo).
 - **Resumable + shardable.** One file per page (`p<idx>.txt`, written atomically); a page already on
   disk is skipped, so a re-run only fills gaps. `--merge` stitches a volume into one `## p. N`-marked
   `.txt` for the parser — the same format the downstream steps already understand.
@@ -155,12 +168,48 @@ segments on the typographic signal and heals what OCR/line-wrapping break:
 - **Toponym case** — headwords are printed UPPERCASE; `headword_disp` holds a title-cased form
   (`LUS-LA-CROIX-HAUTE` → `Lus-la-Croix-Haute`) with multilingual particles (`de`, `la`, `von`, `of`, …) lower-cased.
 
-Statistical tables are **not** linearised into the prose — they are digitised separately by a vision-LLM
-(see [tables](#5-tables-maps-and-the-demo)). `parse_ocr.py` replaces the earlier `parse_html.py`, which
+Statistical tables are **not** linearised into the prose — they are detected and routed out at the
+[OCR stage](#1-ocr-the-scans--processocr_pagespy) and digitised separately by a vision-LLM (see
+[tables](#5-tables-maps-and-the-demo)). `parse_ocr.py` replaces the earlier `parse_html.py`, which
 parsed a third-party HTML transcript no longer used.
 
-**Volume I (our OCR):** 11,393 entries · 813 cross-references · ~1,426 multi-place entries (via `—Also`)
-· pages 3–896. The remaining volumes parse as their OCR completes.
+**Segmentation hardening (from real failures).** Two entry typographies coexist — inline minor entries
+(`HEADWORD, a town of …`) and **standalone display headings** for the big multi-page country articles
+(the headword alone on a line, prose following, sometimes a drop-cap so the name isn't even echoed) — so
+heading detection combines the alphabetical-continuity and sentence-boundary signals to tell a real
+heading from an interrupting running-head. The parser also: scrubs recurrent **library/scan stamps**
+(*University of Minnesota*, Google colophons) and in-body page numbers; **heals hyphen-wrapped
+headwords** (only on lowercase-continuation or an all-caps wrap — *not* a prose hyphen gluing onto the
+next headword); and classifies the cross-reference variants (`ZALAD, or ZALA. See SZALAD.`, and the
+no-`See` form `TRAZ-OZ-MONTES. TRAS-OS-MONTES.`). **Validated** against an independent reference
+transcript (headword counts only, never ingested): **~98% headword agreement** across all seven volumes,
+with the residual hard cases sent to a review UI rather than chased with ever-riskier regex.
+
+**Back-matter is retained, not discarded.** Volume VII's **Appendix** (the toponym concordance + its
+introductory essay) is parsed into a `back_matter` table (`kind='appendix'`) instead of being dropped at
+the `APPENDIX` marker — it's a [toponym-authority goldmine](#6-volume-vii-appendix--toponym-authority)
+in its own right.
+
+**Human-in-the-loop review.** The irreducible hard cases (very short/odd headwords, suspiciously long
+blobs, possible merges) feed a **local Flask review UI** (`process/review_ui.py`) — keep/reject/merge/
+split/edit, work-list sorted worst-first. Decisions are written to a **signature-keyed sidecar**
+(`data/review.sqlite`, keyed by `source|headword|page`, *not* `entry_id`) so they **survive re-parses
+and DB rebuilds** — re-running the parser or copying a fresh DB never loses the manual calls. This is the
+local precursor to a planned gazetteer-agnostic QA module on the WHG/Django platform.
+
+**Corpus status:** all **seven volumes** are OCR'd (table-aware) and parsed into the working store
+`data/gotw_seg.sqlite` — **~92k entry blocks** (≈86.7k typed `entry` records to extract, plus
+cross-references and the Vol VII back-matter). Volume I alone is ~11.4k entries · ~813 cross-references
+· ~1,426 multi-place entries (via `—Also`), pages 3–896.
+
+> **Validation experiment — a reference-free OCR/segmentation check with a vision-LLM.** Because we
+> self-host a vision model anyway, we tried using it to *independently* list each page's entry headings
+> (`process/vlm_headings.py` / `vlm_validate.py`: Qwen2.5-VL, submitted per-column, headings diffed
+> against our parsed headwords). On a 383-page volume it confirmed the parse is **~93% right**
+> (recall 0.93, precision ~0.92) and even caught a couple of real merges our parser missed. **But** as a
+> *candidate generator* it's noisy — the diff is dominated by the VLM's own ~7–8% miss/mis-read rate —
+> so we use it as a **per-volume validation metric, not a full-corpus error miner** for this
+> already-well-validated source, reserving the mining mode for future gazetteers that lack a reference.
 
 **Schema:** `source` (one row per volume) → `entry` (one row per headword block) →
 `place` (the unit of interest; populated by step 3). We use **SQLite, not DuckDB**, because
@@ -312,13 +361,23 @@ handling the offset drift (16→80) caused by ~70 unpaginated steel plates that 
 - **Tables — vision-LLM into `table_data`** — Surya's layout model does **not** detect these unruled
   1856 tables, and prose OCR scrambles their cells, so `process/extract_tables.py` digitises them with a
   **vision** model — self-hosted **Qwen2.5-VL-72B** on the cluster (`--backend vllm`, free) or Gemini
-  Flash (`--backend gemini`, ~$1.50 for the corpus). To bound cost it flags **candidate pages by
-  numeric-row runs** in the column-ordered OCR (a table leaves a run of number-heavy lines; prose tops
-  out ~2, tables score 6–9), then sends each to the model for structured `{title, header, rows}`.
-  Validated: the *Madras* climate + districts tables digitise cleanly (Qwen2.5-VL even keeps the print's
-  `·` decimals). ⚠️ Note the two vision models *disagreed on some digits* (e.g. an area `8,700` vs
-  `3,700`) — table digit accuracy is error-prone for any single model, so tables warrant the same
-  two-reader scrutiny as the prose.
+  Flash (`--backend gemini`, ~$1.50 for the corpus). **Detection now happens at the OCR stage**, not
+  here: `ocr_pages.py` finds the table regions (see [OCR](#1-ocr-the-scans--processocr_pagespy)) and
+  routes them out of the prose, leaving `<!-- table bbox=… -->` markers, so the candidate pages are
+  simply *those carrying a bbox marker* — no separate text-heuristic, and the table cells never pollute
+  the entry text. Each candidate page goes to the model for a **structured, data-first** record.
+  - **Storage format (deliberate choice).** We store tables as **structured JSON — never HTML** —
+    because the row labels are *place names* we want to reconcile like any other toponym, and the figures
+    are data we want to query/aggregate; HTML conflates data with presentation, isn't queryable, and
+    carries a sanitisation burden. We weighed HTML / Markdown / CSV / [CSVW](https://www.w3.org/TR/tabular-data-primer/)
+    and chose a CSVW-flavoured model: each table is `{title, columns:[{label, group, unit, type}], rows,
+    source_note, footnotes}`, where `group` carries multi-level headers (*Population* spanning
+    *1831*/*1841*), `unit`/`type` type each column, and **`type:"place"` flags the reconcilable
+    row-label column**. HTML is then a ~20-line client-side render, never the source of truth.
+  - Validated: the *Madras* climate + districts tables digitise cleanly (Qwen2.5-VL even keeps the
+    print's `·` decimals). ⚠️ The two vision models *disagreed on some digits* (e.g. an area `8,700` vs
+    `3,700`) — table digit accuracy is error-prone for any single model, so tables warrant the same
+    two-reader scrutiny as the prose.
 - **Maps** — `process/extract_maps.py` finds illustration plates (ink-filtering out blank/stamp pages
   and marbled endpapers) and vision-classifies them. **Volume V contains no cartographic maps**: its 8
   steel plates are all city/landscape views (Magdeburg, Malta, Melrose Abbey, Mytelene, New York Bay,
