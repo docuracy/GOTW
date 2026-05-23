@@ -65,14 +65,17 @@ def vlm_headings(jpeg):
         "messages": [{"role": "user", "content": [
             {"type": "text", "text": PROMPT},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]}],
-        "max_tokens": 4096, "temperature": 0,
+        "max_tokens": 8192, "temperature": 0,
         "response_format": {"type": "json_schema",
                             "json_schema": {"name": "Headings", "schema": SCHEMA, "strict": True}},
     }).encode()
     req = urllib.request.Request(VL_BASE.rstrip("/") + "/chat/completions", data=body, method="POST",
                                  headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"})
-    r = json.load(urllib.request.urlopen(req, timeout=900))
-    return json.loads(r["choices"][0]["message"]["content"]).get("headings", [])
+    try:
+        r = json.load(urllib.request.urlopen(req, timeout=900))
+        return json.loads(r["choices"][0]["message"]["content"]).get("headings", [])
+    except Exception:
+        return []                                    # truncated/garbage VLM output -> skip this column, don't crash
 
 
 def vol_headwords(con, vol):
