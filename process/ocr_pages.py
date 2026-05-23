@@ -46,6 +46,49 @@ _FOUND = _REC = _DET = _LAY = None
 TABLE_LABELS = {"Table"}
 FIGURE_LABELS = {"Picture", "Figure"}
 IMG_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
+# Surya's LayoutPredictor misses the UNRULED 1856 statistical tables. They OCR as a run of
+# consecutive high-digit-fraction line-boxes (each numeric cell is its own line: "552,383",
+# "0 16 11"). Detect such runs per column and route them out like a ruled table — generalises to
+# any source with numeric tables, and isolated numeric prose (a lone coord/pop line) is spared by
+# requiring a RUN.
+TABLE_MIN_RUN = 4          # >=4 numeric cells in a run = a table (prose numerics stay <DIGIT_FRAC)
+TABLE_DIGIT_FRAC = 0.40
+TABLE_MAX_GAP = 2          # bridge up to 2 non-numeric lines (headers/captions) inside a table
+
+
+def _digit_frac(t):
+    t = t.strip()
+    return sum(c.isdigit() for c in t) / max(len(t), 1)
+
+
+def _tabular(t):
+    """A numeric table cell: high digit fraction, or a short token containing a digit."""
+    s = t.strip()
+    return _digit_frac(s) >= TABLE_DIGIT_FRAC or (len(s) <= 8 and any(c.isdigit() for c in s))
+
+
+def table_run_idx(col_lines):
+    """Indices (into a scan-ordered list of (box,text)) lying in a numeric-table run: >=MIN_RUN
+    tabular lines, bridging up to MAX_GAP non-numeric lines (table headers/captions) inside it."""
+    flag = [_tabular(t) for _, t in col_lines]
+    out, i, n = set(), 0, len(flag)
+    while i < n:
+        if not flag[i]:
+            i += 1
+            continue
+        j, last, gap = i, i, 0                       # extend, allowing short non-numeric gaps
+        while j < n:
+            if flag[j]:
+                last, gap = j, 0
+            else:
+                gap += 1
+                if gap > TABLE_MAX_GAP:
+                    break
+            j += 1
+        if sum(flag[i:last + 1]) >= TABLE_MIN_RUN:    # enough actual numeric cells in the span
+            out.update(range(i, last + 1))
+        i = last + 1
+    return out
 
 
 def _models():
@@ -113,10 +156,34 @@ def ocr_image(img):
             continue
         b = box_of(tl)
         if any(in_box(center(b), r) for r in regions):
-            continue                                # inside a table/figure -> routed separately
+            continue                                # inside a Surya table/figure -> routed separately
         boxed.append((b, txt))
     pageno = header_pageno(boxed, img.height)
-    return reading_order(boxed, img.width), tables, figures, pageno
+    # Route out UNRULED numeric tables (Surya's layout misses them). A table breaks the two-column
+    # flow, so detect digit-runs BOTH per column (within-column tables, e.g. US p.282) AND over all
+    # lines sorted by y (full-width tables, whose rows the column split would break) — exclude the
+    # union, record a bbox per run so the vision table-pass can still crop it.
+    mid = img.width / 2
+    excluded, detected = set(), list(tables)
+
+    def mark(order):                                # order: indices into `boxed`, in scan order
+        tab = table_run_idx([boxed[i] for i in order])
+        if not tab:
+            return
+        idxs = [order[k] for k in tab]
+        excluded.update(idxs)
+        xs = [v for i in idxs for v in (boxed[i][0][0], boxed[i][0][2])]
+        ys = [v for i in idxs for v in (boxed[i][0][1], boxed[i][0][3])]
+        detected.append([min(xs), min(ys), max(xs), max(ys)])
+
+    left = sorted([i for i in range(len(boxed)) if center(boxed[i][0])[0] < mid], key=lambda i: boxed[i][0][1])
+    right = sorted([i for i in range(len(boxed)) if center(boxed[i][0])[0] >= mid], key=lambda i: boxed[i][0][1])
+    mark(left)
+    mark(right)
+    mark(sorted(range(len(boxed)), key=lambda i: boxed[i][0][1]))   # full-width pass
+    lines = ([boxed[i][1] for i in left if i not in excluded]
+             + [boxed[i][1] for i in right if i not in excluded])
+    return lines, detected, figures, pageno
 
 
 def page_block(img, idx):
