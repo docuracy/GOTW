@@ -56,9 +56,9 @@ def build_sbatch(*, db, repo, ingest_glob, concurrency, threshold, radius_km, li
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default="/vast/ishi/gotw/data/gotw.sqlite")
+    ap.add_argument("--db", default="/vast/ishi/gotw/data/gotw_seg.sqlite")   # table-aware re-OCR'd dataset
     ap.add_argument("--repo", default="/vast/ishi/gotw")
-    ap.add_argument("--ingest-glob", default="llama_jsonl/llama.*.jsonl",
+    ap.add_argument("--ingest-glob", default="llama_seg/llama.*.jsonl",       # fresh re-extract output
                     help="ingest these shard JSONLs first (relative to --repo); '' or --no-ingest to skip")
     ap.add_argument("--no-ingest", action="store_true")
     ap.add_argument("--concurrency", type=int, default=24)   # gateway is local/fast
