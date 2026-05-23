@@ -84,8 +84,8 @@ con.execute("CREATE TABLE qa(entry_id INTEGER PRIMARY KEY, flags TEXT, idx_sim R
 suspects = []
 for eid, hw, disp, text, kind in con.execute(
         "SELECT entry_id,headword,headword_disp,text,kind FROM entry"):
-    fl = intrinsic_flags(hw, text, kind)
-    if fl:
+    fl = intrinsic_flags(disp, text, kind)       # use the FULL headword (incl. parenthetical, e.g.
+    if fl:                                        # "Yvi (Saint)" -> not short) for length-based flags
         suspects.append((eid, disp, fl))
 print("intrinsic suspects:", len(suspects))
 
