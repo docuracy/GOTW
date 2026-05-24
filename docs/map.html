@@ -379,9 +379,11 @@
   async function searchDb() {
     if (!DBW) {
       rstatus("loading search index…");
+      // ABSOLUTE urls: relative ones would resolve inside the worker (base = the worker's own dir) and double the path
+      const abs = p => new URL(p, location.href).toString();
       DBW = await createDbWorker(
-        [{ from: "inline", config: { serverMode: "full", url: "./search/gotw-fts.sqlite", requestChunkSize: 4096 } }],
-        "./search/lib/sqlite.worker.js", "./search/lib/sql-wasm.wasm");
+        [{ from: "inline", config: { serverMode: "full", url: abs("./search/gotw-fts.sqlite"), requestChunkSize: 4096 } }],
+        abs("./search/lib/sqlite.worker.js"), abs("./search/lib/sql-wasm.wasm"));
     }
     return DBW;
   }
