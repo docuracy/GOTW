@@ -99,6 +99,10 @@
     .rnogeo { font-family:system-ui,sans-serif; font-size:.7rem; color:#a99e8a; font-style:italic; }
     .report-link { font-family:system-ui,sans-serif; font-size:.72rem; color:#9a6b4a; text-decoration:none; }
     .report-link:hover { text-decoration:underline; }
+    .pop-reports { margin-top:.6rem; border-top:1px solid var(--line); padding-top:.4rem; font-family:system-ui,sans-serif; font-size:.76rem; }
+    .pop-reports b { display:block; color:#9a6b4a; margin-bottom:.2rem; }
+    .pop-reports a { display:block; color:#2a6f97; text-decoration:none; margin:.1rem 0; }
+    .pop-reports a:hover { text-decoration:underline; }
   </style>
 </head>
 <body>
@@ -169,6 +173,32 @@
       meta: JSON.stringify({ eid: eid ?? null, vol: volLabel || null, page: page ?? null, headword: headword || null }),
     });
     return `https://github.com/docuracy/GOTW/issues/new?${qs.toString()}`;
+  }
+
+  // Surface existing reports in popups: fetch the repo's `explorer-report` issues ONCE (cached ~5 min, to
+  // respect GitHub's 60/hr unauthenticated limit) and index by the eid in each issue's deep link / meta.
+  let _reps = null, _repsAt = 0;
+  async function reportsByEid() {
+    if (_reps && Date.now() - _repsAt < 300000) return _reps;
+    try {
+      const r = await fetch("https://api.github.com/repos/docuracy/GOTW/issues?labels=explorer-report&state=all&per_page=100",
+                            { headers: { Accept: "application/vnd.github+json" } });
+      if (!r.ok) throw 0;
+      const map = {};
+      for (const it of await r.json()) {
+        if (it.pull_request) continue;
+        const m = (it.body || "").match(/[?&]entry=(\d+)/) || (it.body || "").match(/"eid"\s*:\s*(\d+)/);
+        if (m) (map[+m[1]] = map[+m[1]] || []).push({ number: it.number, title: it.title, state: it.state, url: it.html_url });
+      }
+      _reps = map; _repsAt = Date.now();
+    } catch { _reps = _reps || {}; }   // rate-limited/offline -> just show no reports
+    return _reps;
+  }
+  function reportsHTML(reps) {
+    const open = reps.filter(r => r.state === "open").length;
+    return `<div class="pop-reports"><b>⚑ ${reps.length} report${reps.length > 1 ? "s" : ""}${open ? ` · ${open} open` : ""}</b>`
+      + reps.slice(0, 5).map(r => `<a href="${r.url}" target="_blank" rel="noopener">#${r.number} ${esc(r.title)}${r.state === "closed" ? " ✓" : ""}</a>`).join("")
+      + `</div>`;
   }
 
   function popupHTML(p) {
@@ -249,8 +279,16 @@
     if (placePopup) placePopup.remove();
     const popup = placePopup = new maplibregl.Popup({ maxWidth: "320px" }).setLngLat(lngLat).addTo(map);
     popup.setHTML(`<div class="pop"><h3>${esc(name || "")}</h3><p class="meta">loading…</p></div>`);
-    try { const html = popupHTML(await getDetail(id)); if (popup === placePopup) popup.setHTML(html); }
-    catch { if (popup === placePopup) popup.setHTML(`<div class="pop"><h3>${esc(name || "")}</h3><p class="meta">detail unavailable</p></div>`); }
+    let detail;
+    try { detail = await getDetail(id); }
+    catch { if (popup === placePopup) popup.setHTML(`<div class="pop"><h3>${esc(name || "")}</h3><p class="meta">detail unavailable</p></div>`); return; }
+    if (popup !== placePopup) return;
+    popup.setHTML(popupHTML(detail));
+    try {   // surface any existing error-reports for this entry (cached lookup, no per-popup request)
+      const reps = (await reportsByEid())[detail.eid];
+      const el = reps && reps.length && popup === placePopup && popup.getElement() && popup.getElement().querySelector(".pop");
+      if (el) el.insertAdjacentHTML("beforeend", reportsHTML(reps));
+    } catch {}
   }
 
   function addLayers() {
