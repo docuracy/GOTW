@@ -450,39 +450,39 @@
     const out = await PHON.sess.run({
       char_ids: T(ids.length ? ids : [1], [1, L]), script_id: T([sid], [1]), lang_id: T([lid], [1]), length: T([L], [1]) });
     const v = out.embedding.data, emb = PHON.emb, n = PHON.n, dim = PHON.dim;
-    const K = 8, bi = Array(K).fill(-1), bs = Array(K).fill(-Infinity);
+    const K = 10, bi = Array(K).fill(-1), bs = Array(K).fill(-Infinity);
     for (let r = 0; r < n; r++) { let s = 0; const o = r * dim;
       for (let d = 0; d < dim; d++) s += v[d] * emb[o + d];
       if (s > bs[K - 1]) { let j = K - 1; while (j > 0 && bs[j - 1] < s) { bs[j] = bs[j - 1]; bi[j] = bi[j - 1]; j--; } bs[j] = s; bi[j] = r; } }
-    const m = PHON.meta;
-    return bi.filter(i => i >= 0).map(i => ({ eid: m.eid[i], vol: m.vol[i], page: m.page[i], rc: m.rc[i], headword: m.hw[i] }));
+    const m = PHON.meta;   // score ≈ cosine (corpus stored int8 with scale 127)
+    return bi.map((i, k) => i < 0 ? null : { eid: m.eid[i], vol: m.vol[i], page: m.page[i], rc: m.rc[i], headword: m.hw[i], score: bs[k] / 127 }).filter(Boolean);
   }
+  const PHON_MIN = 0.70;   // hide weak "matches" (Symphonym README: >0.75 ≈ phonetically similar)
 
-  let curQ = "";
+  let qTok = 0;            // supersedes stale async results (FTS + phonetic) so the DOM tracks the latest query
   async function doSearch(q) {
-    q = q.trim(); curQ = q;
+    q = q.trim(); const tok = ++qTok;
     if (q.length < 2) { $res().hidden = true; return; }
     const phonOn = document.getElementById("phon").checked;
-    if (!searching) {
-      searching = true;
-      try {
-        const w = await searchDb(), fz = fuzzyExpr(q), ex = ftsExpr(q);
-        const names = fz ? await w.db.query("SELECT d.eid,d.vol,d.page,d.rc,d.headword FROM hw JOIN doc d ON d.eid=hw.rowid WHERE hw MATCH ? ORDER BY rank LIMIT 8", [fz]) : [];
-        const full = ex ? await w.db.query("SELECT d.eid,d.vol,d.page,d.rc,d.headword, snippet(fts,1,char(2),char(3),'…',10) AS sn FROM fts JOIN doc d ON d.eid=fts.rowid WHERE fts MATCH ? ORDER BY rank LIMIT 12", [ex]) : [];
-        const seen = new Set(names.map(r => r.eid)), full2 = full.filter(r => !seen.has(r.eid));
-        let h = phonOn ? `<div class="rs-status" id="phon-pending">loading phonetic matches…</div>` : "";
-        if (names.length) h += sec("Place names (fuzzy)") + names.map(r => resRow(r, null)).join("");
-        if (full2.length) h += sec("In the full text") + full2.map(r => resRow(r, r.sn)).join("");
-        $res().innerHTML = h || `<div class="rs-status">No matches for “${esc(q)}”.</div>`;
-        $res().hidden = false;
-      } catch (e) { rstatus("search unavailable: " + ((e && e.message) || e)); }
-      searching = false;
-    }
-    if (phonOn) phonHits(q).then(phon => {       // async — never blocks the fast FTS results
-      if (curQ !== q) return;
+    try {
+      const w = await searchDb(); if (tok !== qTok) return;
+      const fz = fuzzyExpr(q), ex = ftsExpr(q);
+      const names = fz ? await w.db.query("SELECT d.eid,d.vol,d.page,d.rc,d.headword FROM hw JOIN doc d ON d.eid=hw.rowid WHERE hw MATCH ? ORDER BY rank LIMIT 8", [fz]) : [];
+      const full = ex ? await w.db.query("SELECT d.eid,d.vol,d.page,d.rc,d.headword, snippet(fts,1,char(2),char(3),'…',10) AS sn FROM fts JOIN doc d ON d.eid=fts.rowid WHERE fts MATCH ? ORDER BY rank LIMIT 12", [ex]) : [];
+      if (tok !== qTok) return;
+      const seen = new Set(names.map(r => r.eid)), full2 = full.filter(r => !seen.has(r.eid));
+      let h = phonOn ? `<div class="rs-status" id="phon-pending">loading phonetic matches…</div>` : "";
+      if (names.length) h += sec("Place names (fuzzy)") + names.map(r => resRow(r, null)).join("");
+      if (full2.length) h += sec("In the full text") + full2.map(r => resRow(r, r.sn)).join("");
+      $res().innerHTML = h || `<div class="rs-status">No matches for “${esc(q)}”.</div>`;
+      $res().hidden = false;
+    } catch (e) { rstatus("search unavailable: " + ((e && e.message) || e)); return; }
+    if (phonOn) phonHits(q).then(hits => {       // async — never blocks the fast FTS results
+      if (tok !== qTok) return;                  // a newer query owns the DOM now
       const pend = document.getElementById("phon-pending"); if (pend) pend.remove();
+      const phon = hits.filter(p => p.score >= PHON_MIN);
       if (phon.length) $res().insertAdjacentHTML("afterbegin", sec("Phonetic / cross-script") + phon.map(r => resRow(r, null)).join(""));
-    }).catch(() => { const pend = document.getElementById("phon-pending"); if (pend) pend.textContent = "phonetic mode unavailable"; });
+    }).catch(() => { if (tok !== qTok) return; const pend = document.getElementById("phon-pending"); if (pend) pend.remove(); });
   }
   (function wireSearch() {
     const qi = document.getElementById("q"); if (!qi) return;
