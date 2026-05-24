@@ -25,7 +25,9 @@ def vtag(fn):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default="data/gotw_seg.sqlite")
-    ap.add_argument("--out", default="docs/search/gotw-fts.sqlite")
+    # .png extension is deliberate: GitHub Pages gzips .sqlite (which corrupts sql.js-httpvfs byte-range
+    # reads — ranges would index the compressed stream); it never gzips images, so ranges stay raw.
+    ap.add_argument("--out", default="docs/search/gotw-fts.sqlite.png")
     ap.add_argument("--chunk-size", type=int, default=150, help="MUST match export_reader (for rc -> reader chunk)")
     ap.add_argument("--page-size", type=int, default=4096, help="small pages = less over-fetch per range request")
     args = ap.parse_args()

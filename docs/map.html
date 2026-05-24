@@ -382,7 +382,8 @@
       // ABSOLUTE urls: relative ones would resolve inside the worker (base = the worker's own dir) and double the path
       const abs = p => new URL(p, location.href).toString();
       DBW = await createDbWorker(
-        [{ from: "inline", config: { serverMode: "full", url: abs("./search/gotw-fts.sqlite"), requestChunkSize: 4096 } }],
+        // NB .png extension: GitHub Pages gzips .sqlite (breaking byte-range reads), but never images
+        [{ from: "inline", config: { serverMode: "full", url: abs("./search/gotw-fts.sqlite.png"), requestChunkSize: 4096 } }],
         abs("./search/lib/sqlite.worker.js"), abs("./search/lib/sql-wasm.wasm"));
     }
     return DBW;
