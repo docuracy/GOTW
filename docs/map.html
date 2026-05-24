@@ -74,6 +74,8 @@
     .rtable .unit { font-weight:normal; color:#857d6c; }
     .rnote { font-size:.72rem; color:#857d6c; font-style:italic; margin-top:.1rem; }
     #sentinel-top, #sentinel-bottom { height:1px; }
+    .rmiss { background:#fff3cd; border:1px solid #ffe69c; color:#7a5b00; padding:.4rem .7rem; margin:.3rem 0;
+             border-radius:4px; font-family:system-ui,sans-serif; font-size:.78rem; }
     /* search */
     header #q { font-family:Georgia,serif; font-size:.85rem; padding:.32rem .55rem; border:1px solid var(--line);
                 border-radius:4px; min-width:230px; flex:0 1 320px; }
@@ -386,7 +388,7 @@
     const rep = `<a class="report-link" href="${reportUrl(en.eid, en.hw, vlabel, en.p)}" target="_blank" rel="noopener" title="Report a data error (GitHub)">⚑ report</a>`;
     const reps = repsFor(en.eid);   // existing reports -> a clickable badge (click to expand)
     const repBadge = reps ? `<button class="rrep" data-eid="${en.eid}" title="${reps.length} report(s) on this entry — click to view">⚑ ${reps.length}</button>` : "";
-    let h = `<article class="rentry${hi ? " hi" : ""}" data-eid="${en.eid}">`;
+    let h = `<article class="rentry${hi ? " hi" : ""}" data-eid="${en.eid}" data-p="${en.p ?? ""}">`;
     h += `<h4 class="rhw">${esc(en.hw)} <span class="rp">${esc(vlabel)}${en.p ? `, p.${en.p}` : ""}</span> ${geo} ${repBadge} ${rep}</h4>`;
     h += `<div class="rtext${en.k === "c" ? " rxref" : ""}">${esc(en.text)}</div>`;
     (en.tables || []).forEach(t => h += renderTable(t));
@@ -428,7 +430,14 @@
     $content().innerHTML = await addrHTML(vi, ci, { eid, page, hw });
     RD.loVi = RD.hiVi = vi; RD.loCi = RD.hiCi = ci;
     showModal();
-    ($content().querySelector(".rentry.hi") || $content().firstElementChild || {}).scrollIntoView?.({ block: "start" });
+    // land on the exact entry; else the first entry on the target page; else the chunk top — and say so
+    const exact = $content().querySelector(".rentry.hi");
+    const onPage = page != null && page !== "" ? $content().querySelector(`.rentry[data-p="${String(page).replace(/[^0-9]/g, "")}"]`) : null;
+    if (!exact && (eid != null || hw)) {
+      $content().insertAdjacentHTML("afterbegin",
+        `<div class="rmiss">Couldn't locate “${esc(hw || "")}”${page ? ` (p.${page})` : ""} in the transcription — showing the nearest text.</div>`);
+    }
+    (exact || onPage || $content().firstElementChild || {}).scrollIntoView?.({ block: "start" });
   }
   function showModal() {
     document.getElementById("modal").hidden = false; document.body.style.overflow = "hidden";
