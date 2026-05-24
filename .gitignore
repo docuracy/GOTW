@@ -13,8 +13,10 @@ docs/places.geojson
 # history. (Untracked at cutover: git rm --cached -r docs/reader docs/search/gotw-fts.sqlite.png)
 docs/reader/
 docs/search/gotw-fts.sqlite.png
-docs/search/symphonym.onnx
+docs/search/symphonym*.onnx
 docs/search/symphonym-embeddings.*
+docs/search/symphonym-meta.json
+docs/search/symphonym-manifest.json
 
 # Scratch operational helpers (cluster-specific paths; reference rights-bound transcripts)
 process/_*.sh

@@ -37,8 +37,10 @@ jobs:
           mkdir -p /tmp/assets docs/search
           gh release download site-assets --repo "$GITHUB_REPOSITORY" --dir /tmp/assets --clobber
           tar -xf /tmp/assets/reader.tar -C docs/                       # -> docs/reader/
-          cp /tmp/assets/gotw-fts.sqlite.png docs/search/gotw-fts.sqlite.png
-          echo "assets in place:"; du -sh docs/reader docs/search/gotw-fts.sqlite.png
+          cp /tmp/assets/gotw-fts.sqlite.png docs/search/
+          cp /tmp/assets/symphonym.int8.onnx /tmp/assets/symphonym-embeddings.i8 \
+             /tmp/assets/symphonym-meta.json /tmp/assets/symphonym-manifest.json docs/search/
+          echo "assets in place:"; du -sh docs/reader docs/search/gotw-fts.sqlite.png docs/search/symphonym-embeddings.i8
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
