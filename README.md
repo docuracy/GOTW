@@ -457,6 +457,17 @@ refinement — tallying spellings across all volumes, most-populous wins — wil
 
 ---
 
+## Origin
+
+This project arose from **Humphrey Southall**'s offer of his transcripts of *A Gazetteer of the World*
+to **Ruth Mostern** (Director, World Historical Gazetteer), and the discussion that followed. The
+pipeline ultimately works from our **own OCR of the public-domain 1856 scans** rather than those
+transcripts — a deliberate choice for a cleanly public-domain, licence-unencumbered output (see the
+*Why self-OCR* note under [the OCR stage](#1-ocr-the-scans--processocr_pagespy)) — but it owes its
+genesis to that exchange.
+
+---
+
 ## Credits
 
 - **Royal Geographical Society** — corporate author of the source work, *A Gazetteer of the World*
