@@ -139,8 +139,8 @@ def main():
         for r, c in zip(rows, pops):
             p = props_of(r)
             light = {k: p[k] for k in LIGHT_KEYS if k in p}
-            if c and maxp:               # population marker scaling: latest-year count -> 1.3×…3× radius (sqrt)
-                light["psize"] = round(1.3 + 1.7 * math.sqrt(c / maxp), 2)
+            if c and maxp:               # normalised population (sqrt of latest-year count); frontend scales radius
+                light["pn"] = round(math.sqrt(c / maxp), 3)
             f.write(json.dumps(point(r["lon"], r["lat"], light), ensure_ascii=False) + "\n")
             shards[p["id"] % n][str(p["id"])] = p
             if r["eid"] is not None:

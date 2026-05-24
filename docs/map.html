@@ -236,12 +236,15 @@
   const SRC = { url: "./places.pmtiles", layer: "places", detail: "./detail" };
 
   // Circles fade IN as the heatmap fades OUT (cross-fade across z5–7).
+  // A place with a population is POP_MIN…POP_MAX × the default radius (by normalised latest-year pop `pn`,
+  // sqrt-scaled in the tile). Tunable here without rebuilding tiles. zoom-interpolate must be top-level, so
+  // the population factor multiplies inside each stop.
+  const POP_MIN = 1.3, POP_MAX = 10;
+  const popFactor = ["case", ["has", "pn"], ["+", POP_MIN, ["*", POP_MAX - POP_MIN, ["get", "pn"]]], 1];
   const PAINT = {
-    // base radius by zoom × the population factor baked into the tile (psize 1.3–3×; 1 if no pop).
-    // zoom-interpolate must be top-level (MapLibre), so the psize multiply lives inside each stop.
     "circle-radius": ["interpolate", ["linear"], ["zoom"],
-      4, ["*", 3, ["coalesce", ["get", "psize"], 1]],
-      10, ["*", 7, ["coalesce", ["get", "psize"], 1]]],
+      4, ["*", 3, popFactor],
+      10, ["*", 7, popFactor]],
     "circle-color": ["match",["get","fclass"],
       "P",COLORS.P,"A",COLORS.A,"H",COLORS.H,"T",COLORS.T,"S",COLORS.S,"X",COLORS.X, "#777"],
     "circle-stroke-width": 1, "circle-stroke-color": "#fff",
