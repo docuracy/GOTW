@@ -1,0 +1,45 @@
+name: Deploy Pages
+
+# Deploys docs/ to GitHub Pages as an artifact. The large generated assets (whole-corpus reader store
+# and the FTS search DB) are NOT committed to git — they live in the 'site-assets' Release and are
+# pulled in here at build time, so regenerating them never bloats git history. Re-publish them with
+# process/publish_assets.sh after a rebuild.
+#
+# Cutover (one-time): repo Settings → Pages → Source = "GitHub Actions", then enable the push trigger below.
+
+on:
+  workflow_dispatch:
+  # push: { branches: [main] }      # ← uncomment after the cutover
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull large assets from the 'site-assets' release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/assets docs/search
+          gh release download site-assets --repo "$GITHUB_REPOSITORY" --dir /tmp/assets --clobber
+          tar -xf /tmp/assets/reader.tar -C docs/                       # -> docs/reader/
+          cp /tmp/assets/gotw-fts.sqlite.png docs/search/gotw-fts.sqlite.png
+          echo "assets in place:"; du -sh docs/reader docs/search/gotw-fts.sqlite.png
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deployment
+        uses: actions/deploy-pages@v4

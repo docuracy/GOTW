@@ -9,6 +9,10 @@ data/aat_index.pkl
 data/maps/
 docs/places.geojsonl
 docs/places.geojson
+# Large generated site assets — served via the 'site-assets' release + Pages workflow, kept out of git
+# history. (Untracked at cutover: git rm --cached -r docs/reader docs/search/gotw-fts.sqlite.png)
+docs/reader/
+docs/search/gotw-fts.sqlite.png
 
 # Scratch operational helpers (cluster-specific paths; reference rights-bound transcripts)
 process/_*.sh
