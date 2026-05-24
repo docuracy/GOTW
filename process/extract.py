@@ -202,8 +202,17 @@ PROMPT_SIG = hashlib.sha256(
     (SYSTEM_PROMPT + json.dumps(SCHEMA, sort_keys=True)).encode()).hexdigest()[:16]
 
 
+# Cap the entry text sent to the model. The classifiable fields (type, country, coordinates, population)
+# cluster at the head of a gazetteer entry; the long tail is descriptive/historical prose that bloats both
+# input and output. Untruncated, the multi-page country essays overflow the context window (input + 8192
+# output > 32768 -> HTTP 400) or truncate the JSON mid-output (-> invalid). 6000 chars keeps the head (and
+# the early "—Also" places) while bounding input/output. Most entries are far shorter and are untouched.
+TEXT_CHAR_LIMIT = 6000
+
+
 def user_text(entry_text: str) -> str:
-    return f"Extract the place record(s) from this entry:\n\n{entry_text}"
+    t = entry_text if len(entry_text) <= TEXT_CHAR_LIMIT else entry_text[:TEXT_CHAR_LIMIT] + " …[truncated]"
+    return f"Extract the place record(s) from this entry:\n\n{t}"
 
 
 def model_for(provider: str, tokens: int, override: Optional[str]) -> str:
