@@ -106,6 +106,7 @@ def main():
     ap.add_argument("--detail-dir", default="docs/detail", help="sharded popup-detail store")
     ap.add_argument("--detail-shards", type=int, default=256, help="number of detail shard files")
     ap.add_argument("--ocr-dir", default="txt", help="merged OCR .txt dir for HathiTrust seq deep-links")
+    ap.add_argument("--geocoded-out", default="docs/search/geocoded.json", help="eid -> [lon,lat,placeId] for search/reader routing")
     args = ap.parse_args()
     global _SEQMAP
     _SEQMAP = load_seqmap(args.ocr_dir)
@@ -122,17 +123,22 @@ def main():
     # light tile features + sharded detail store
     n = args.detail_shards
     shards: dict[int, dict] = defaultdict(dict)
+    geo: dict = {}                       # eid -> [lon,lat,placeId]: a geocoded place opens on the map
     with out.open("w", encoding="utf-8") as f:
         for r in rows:
             p = props_of(r)
             f.write(json.dumps(point(r["lon"], r["lat"], {k: p[k] for k in LIGHT_KEYS if k in p}),
                                ensure_ascii=False) + "\n")
             shards[p["id"] % n][str(p["id"])] = p
+            if r["eid"] is not None:
+                geo[r["eid"]] = [round(r["lon"], 5), round(r["lat"], 5), p["id"]]
     dd = Path(args.detail_dir); dd.mkdir(parents=True, exist_ok=True)
     for b in range(n):
         (dd / f"{b}.json").write_text(json.dumps(shards.get(b, {}), ensure_ascii=False))
     (dd / "manifest.json").write_text(json.dumps({"shards": n, "count": len(rows)}))
-    print(f"wrote {len(rows)} light features -> {out}; detail -> {dd}/ ({n} shards)")
+    gp = Path(args.geocoded_out); gp.parent.mkdir(parents=True, exist_ok=True)
+    gp.write_text(json.dumps(geo))
+    print(f"wrote {len(rows)} light features -> {out}; detail -> {dd}/ ({n} shards); geocoded -> {gp}")
 
 
 if __name__ == "__main__":

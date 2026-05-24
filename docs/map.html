@@ -92,6 +92,11 @@
     .rs-loc { color:#857d6c; font-size:.72rem; margin-left:.4rem; }
     .rs-sn { color:#5a5446; font-size:.78rem; margin-top:.15rem; line-height:1.4; }
     .rs-sn b { background:#ffe9a8; }
+    .geo-yes { color:#2a6f97; } .geo-no { color:#c2bbab; }
+    .rgeo { font-family:system-ui,sans-serif; font-size:.7rem; cursor:pointer; background:#eaf2f7; color:#2a6f97;
+            border:1px solid #cfe0ea; border-radius:4px; padding:.05rem .4rem; vertical-align:middle; }
+    .rgeo:hover { background:#d8e8f1; }
+    .rnogeo { font-family:system-ui,sans-serif; font-size:.7rem; color:#a99e8a; font-style:italic; }
   </style>
 </head>
 <body>
@@ -213,19 +218,31 @@
     return { ...(await _shardCache.get(b))[id], id };
   }
 
+  // geocoded reconciled places: eid -> [lon, lat, placeId]. Used to route search/reader to the map vs the
+  // reader, and to badge whether a place is located. Cached; missing file -> {} (nothing geocoded yet).
+  let GEO = null, _geoP = null;
+  function geocodedMap() {
+    if (GEO) return Promise.resolve(GEO);
+    if (!_geoP) _geoP = fetch("./search/geocoded.json").then(r => r.ok ? r.json() : {}).then(g => (GEO = g)).catch(() => (GEO = {}));
+    return _geoP;
+  }
+  async function openPlacePopup(lngLat, id, name) {   // the map popup for a place (map click OR search result)
+    const popup = new maplibregl.Popup({ maxWidth: "320px" }).setLngLat(lngLat).addTo(map);
+    popup.setHTML(`<div class="pop"><h3>${esc(name || "")}</h3><p class="meta">loading…</p></div>`);
+    try { popup.setHTML(popupHTML(await getDetail(id))); }
+    catch { popup.setHTML(`<div class="pop"><h3>${esc(name || "")}</h3><p class="meta">detail unavailable</p></div>`); }
+  }
+
   function addLayers() {
     map.addLayer({ id: "heat", type: "heatmap", source: "places", "source-layer": SRC.layer, maxzoom: 8, paint: HEAT });
     // Circles only for INDIVIDUAL places (cluster leaders carry point_count and feed only the heatmap),
     // so a click always resolves to one real place; dense areas stay heatmap until you zoom in enough.
     map.addLayer({ id: "pts", type: "circle", source: "places", "source-layer": SRC.layer,
       minzoom: 5, filter: ["!", ["has", "point_count"]], paint: PAINT });
-    map.on("click", "pts", async e => {
+    map.on("click", "pts", e => {
       const p = e.features[0].properties;
       const at = e.features[0].geometry?.coordinates?.slice ? e.features[0].geometry.coordinates : e.lngLat;
-      const popup = new maplibregl.Popup({ maxWidth: "320px" }).setLngLat(at).addTo(map);
-      popup.setHTML(`<div class="pop"><h3>${esc(p.name || "")}</h3><p class="meta">loading…</p></div>`);
-      try { popup.setHTML(popupHTML(await getDetail(p.id))); }
-      catch { popup.setHTML(`<div class="pop"><h3>${esc(p.name || "")}</h3><p class="meta">detail unavailable</p></div>`); }
+      openPlacePopup(at, p.id, p.name);
     });
     // Hover -> name tooltip, straight from the light tile (no fetch); click -> fetch full detail.
     const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 8, className: "tip" });
@@ -293,8 +310,11 @@
     return h;
   }
   function entryHTML(en, hi, vlabel) {
+    const g = GEO && GEO[en.eid];   // [lon,lat,placeId] if geocoded
+    const geo = g ? `<button class="rgeo" data-lon="${g[0]}" data-lat="${g[1]}" data-pid="${g[2]}" data-hw="${esc(en.hw)}" title="Geocoded — show on the map">📍 on map</button>`
+                  : `<span class="rnogeo" title="Not geocoded">○ not located</span>`;
     let h = `<article class="rentry${hi ? " hi" : ""}" data-eid="${en.eid}">`;
-    h += `<h4 class="rhw">${esc(en.hw)} <span class="rp">${esc(vlabel)}${en.p ? `, p.${en.p}` : ""}</span></h4>`;
+    h += `<h4 class="rhw">${esc(en.hw)} <span class="rp">${esc(vlabel)}${en.p ? `, p.${en.p}` : ""}</span> ${geo}</h4>`;
     h += `<div class="rtext${en.k === "c" ? " rxref" : ""}">${esc(en.text)}</div>`;
     (en.tables || []).forEach(t => h += renderTable(t));
     return h + `</article>`;
@@ -325,7 +345,7 @@
     RD.loading = false;
   }
   async function openReader(vol, page, hw, eid, rc) {
-    await readerIndex();
+    await readerIndex(); await geocodedMap();   // GEO needed for the per-entry "on map" badge
     const vtag = "v" + String(vol).replace(/^v/i, "");   // detail carries "5"; reader dir is "v5"
     const vi = Math.max(0, INDEX.findIndex(v => v.vol === vtag));
     let ci = rc;                          // prefer the exact reader-chunk baked into the place
@@ -335,7 +355,7 @@
     $content().innerHTML = await addrHTML(vi, ci, { eid, page, hw });
     RD.loVi = RD.hiVi = vi; RD.loCi = RD.hiCi = ci;
     showModal();
-    ($content().querySelector(".rentry.hi") || $content().firstElementChild || {}).scrollIntoView?.({ block: "center" });
+    ($content().querySelector(".rentry.hi") || $content().firstElementChild || {}).scrollIntoView?.({ block: "start" });
   }
   function showModal() {
     document.getElementById("modal").hidden = false; document.body.style.overflow = "hidden";
@@ -348,7 +368,15 @@
     document.getElementById("modal").hidden = true; document.body.style.overflow = "";
     ioTop && ioTop.disconnect(); ioBot && ioBot.disconnect();
   }
+  function locateOnMap(lon, lat, pid, name) {   // close modal, fly to the place, open its popup
+    hideModal();
+    const ll = [+lon, +lat];
+    map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 7) });
+    openPlacePopup(ll, +pid, name);
+  }
   document.addEventListener("click", e => {
+    const g = e.target.closest(".rgeo");
+    if (g) return locateOnMap(g.dataset.lon, g.dataset.lat, g.dataset.pid, g.dataset.hw);
     const b = e.target.closest(".read-btn");
     if (b) return openReader(b.dataset.vol, b.dataset.page, b.dataset.hw,
                              b.dataset.eid != null ? +b.dataset.eid : null,
@@ -396,9 +424,13 @@
   const unmark = s => esc(s || "").replaceAll("", "<b>").replaceAll("", "</b>");
   function resRow(r, sn) {
     const loc = `${String(r.vol || "").replace("v", "Vol. ")}${r.page ? `, p.${r.page}` : ""}`;
+    const g = GEO && GEO[r.eid];     // [lon,lat,placeId] if geocoded -> result opens on the map
+    const badge = g ? `<span class="geo-yes" title="Geocoded — opens on the map">📍</span>`
+                    : `<span class="geo-no" title="Not geocoded — opens the source text">○</span>`;
     return `<button class="rs-row" data-vol="${esc(String(r.vol || ""))}" data-page="${r.page ?? ""}" data-hw="${esc(r.headword || "")}"`
-      + ` data-eid="${r.eid}" data-rc="${r.rc ?? ""}"><span class="rs-hw">${esc(r.headword || "")}</span>`
-      + ` <span class="rs-loc">${esc(loc)}</span>${sn ? `<div class="rs-sn">${unmark(sn)}</div>` : ""}</button>`;
+      + ` data-eid="${r.eid}" data-rc="${r.rc ?? ""}"${g ? ` data-lon="${g[0]}" data-lat="${g[1]}" data-pid="${g[2]}"` : ""}>`
+      + `${badge} <span class="rs-hw">${esc(r.headword || "")}</span> <span class="rs-loc">${esc(loc)}</span>`
+      + `${sn ? `<div class="rs-sn">${unmark(sn)}</div>` : ""}</button>`;
   }
   const sec = t => `<div class="rs-sec">${t}</div>`;
 
@@ -465,7 +497,7 @@
     if (q.length < 2) { $res().hidden = true; return; }
     const phonOn = document.getElementById("phon").checked;
     try {
-      const w = await searchDb(); if (tok !== qTok) return;
+      const w = await searchDb(); await geocodedMap(); if (tok !== qTok) return;
       const fz = fuzzyExpr(q), ex = ftsExpr(q);
       const names = fz ? await w.db.query("SELECT d.eid,d.vol,d.page,d.rc,d.headword FROM hw JOIN doc d ON d.eid=hw.rowid WHERE hw MATCH ? ORDER BY rank LIMIT 8", [fz]) : [];
       const full = ex ? await w.db.query("SELECT d.eid,d.vol,d.page,d.rc,d.headword, snippet(fts,1,char(2),char(3),'…',10) AS sn FROM fts JOIN doc d ON d.eid=fts.rowid WHERE fts MATCH ? ORDER BY rank LIMIT 12", [ex]) : [];
@@ -492,7 +524,13 @@
     $res().addEventListener("click", e => {
       const b = e.target.closest(".rs-row"); if (!b) return;
       $res().hidden = true;
-      openReader(b.dataset.vol, b.dataset.page, b.dataset.hw, b.dataset.eid ? +b.dataset.eid : null, b.dataset.rc !== "" ? +b.dataset.rc : null);
+      if (b.dataset.lon) {            // geocoded -> zoom the map and open its popup
+        const ll = [+b.dataset.lon, +b.dataset.lat];
+        map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 7) });
+        openPlacePopup(ll, +b.dataset.pid, b.dataset.hw);
+      } else {                        // not geocoded -> open the source text in the reader
+        openReader(b.dataset.vol, b.dataset.page, b.dataset.hw, b.dataset.eid ? +b.dataset.eid : null, b.dataset.rc !== "" ? +b.dataset.rc : null);
+      }
     });
     document.addEventListener("click", e => { if (!e.target.closest("#results") && e.target.id !== "q") $res().hidden = true; });
   })();
