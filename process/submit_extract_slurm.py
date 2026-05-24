@@ -44,11 +44,20 @@ def build_sbatch(*, db, repo, out_dir, nshards, partition, conc, hf_model, serve
         f"source {_CONDA_SH}",
         f"conda activate {_VLLM_ENV}",
         "module load cuda/12.8.0",
-        f"export HF_HOME={_HF_HOME} XDG_CACHE_HOME=/tmp/vllmcache_${{T}} VLLM_ATTENTION_BACKEND=FLASH_ATTN",
+        # Isolate ALL temp/compile caches in a FRESH node-local dir per shard. Fixes two failure modes:
+        #  (1) vLLM's torch.compile cache can bake in a previous job's /scratch/slurm-<id> path; a later
+        #      job that lands on the same node hits it and dies with PermissionError (killed shards 0/1);
+        #  (2) two shards co-located on one node colliding on shared cache/temp paths.
+        # Keyed by job id + shard so it is unique per shard AND never collides with a stale dir on a reused node.
+        'RUN=/tmp/gotw_run_${SLURM_JOB_ID}_${T}; rm -rf "$RUN"; mkdir -p "$RUN"/{xdg,vllm,inductor,triton}',
+        f"export HF_HOME={_HF_HOME} VLLM_ATTENTION_BACKEND=FLASH_ATTN",
+        'export TMPDIR="$RUN" TEMP="$RUN" TMP="$RUN" XDG_CACHE_HOME="$RUN/xdg"',
+        'export VLLM_CACHE_ROOT="$RUN/vllm" TORCHINDUCTOR_CACHE_DIR="$RUN/inductor" TRITON_CACHE_DIR="$RUN/triton"',
         f"cp {db} /tmp/gotw_${{T}}.sqlite",
         f"vllm serve {hf_model} --host 127.0.0.1 --port ${{PORT}} --max-model-len 32768 \\",
         f"    --gpu-memory-utilization 0.92 --served-model-name {served} > {srv_log} 2>&1 &",
         "SRV=$!",
+        "trap 'kill $SRV 2>/dev/null || true; rm -rf \"$RUN\"' EXIT",   # reap the server + scratch on any exit
         f'echo "waiting for vLLM..."; for i in $(seq 1 150); do grep -qa "Application startup complete" {srv_log} && break; sleep 5; done',
         f'grep -qa "Application startup complete" {srv_log} || {{ echo "server failed"; tail -20 {srv_log}; exit 1; }}',
         f"export QWEN_BASE_URL=http://127.0.0.1:${{PORT}}/v1",
