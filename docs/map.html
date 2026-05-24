@@ -5,9 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <title>Gazetteer of the World — extracted places</title>
-  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
-  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-  <script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js"></script>
+  <link href="./lib/maplibre-gl.css" rel="stylesheet" />
+  <script src="./lib/maplibre-gl.js"></script>
+  <script src="./lib/pmtiles.js"></script>
+  <script src="./search/lib/index.js"></script>   <!-- sql.js-httpvfs (UMD -> window.createDbWorker) -->
+
   <style>
     :root { --ink:#1a2438; --paper:#f4f1ea; --line:#d8d2c4; }
     * { box-sizing:border-box; }
@@ -71,14 +73,33 @@
     .rtable .unit { font-weight:normal; color:#857d6c; }
     .rnote { font-size:.72rem; color:#857d6c; font-style:italic; margin-top:.1rem; }
     #sentinel-top, #sentinel-bottom { height:1px; }
+    /* search */
+    header #q { font-family:Georgia,serif; font-size:.85rem; padding:.32rem .55rem; border:1px solid var(--line);
+                border-radius:4px; min-width:230px; flex:0 1 320px; }
+    #results { position:absolute; top:46px; left:1.1rem; width:min(460px,92vw); max-height:72vh; overflow-y:auto;
+               background:#fff; border:1px solid var(--line); border-radius:6px; box-shadow:0 6px 24px rgba(0,0,0,.28);
+               z-index:900; font-family:system-ui,sans-serif; }
+    #results[hidden] { display:none; }
+    .rs-status { padding:.6rem .8rem; color:#6b6452; font-size:.82rem; }
+    .rs-sec { padding:.35rem .8rem; font-size:.66rem; text-transform:uppercase; letter-spacing:.05em; color:#857d6c;
+              background:#f4f1ea; border-bottom:1px solid var(--line); position:sticky; top:0; }
+    .rs-row { display:block; width:100%; text-align:left; border:none; background:none; cursor:pointer;
+              padding:.4rem .8rem; border-bottom:1px solid #eee; font-family:inherit; }
+    .rs-row:hover { background:#fbf6e7; }
+    .rs-hw { font-weight:bold; color:var(--ink); font-size:.86rem; }
+    .rs-loc { color:#857d6c; font-size:.72rem; margin-left:.4rem; }
+    .rs-sn { color:#5a5446; font-size:.78rem; margin-top:.15rem; line-height:1.4; }
+    .rs-sn b { background:#ffe9a8; }
   </style>
 </head>
 <body>
   <header>
     <h1>A Gazetteer of the World — extracted places</h1>
     <span class="sub">LLM-extracted (self-hosted Llama-3.3-70B) · geolocated against the World Historical Gazetteer (3-pass reconciliation)</span>
+    <input id="q" type="search" placeholder="Search names + full text…" autocomplete="off" />
     <a href="./">← about this project</a>
   </header>
+  <div id="results" hidden></div>
   <div class="wrap"><div id="map"></div>
     <div class="legend" id="legend"><b>Feature type</b></div>
   </div>
@@ -241,11 +262,13 @@
   const $scroll = () => document.getElementById("reader-scroll");
   const $content = () => document.getElementById("reader-content");
 
-  async function addrHTML(vi, ci, target) {   // one chunk's HTML, prefixed with a volume divider at chunk 0
+  async function addrHTML(vi, ci, target) {   // one chunk wrapped in .rchunk so it can be unloaded as a unit
     const data = await rGet(INDEX[vi].vol, ci);
+    const vlabel = (INDEX[vi].title.split("—").pop() || INDEX[vi].vol).trim();   // "Vol. V" — shown per entry
     const div = ci === 0 ? `<div class="rvol">${esc(INDEX[vi].title)}</div>` : "";
-    return div + data.map(en => entryHTML(en, target && (target.eid != null ? en.eid === target.eid
-      : (String(en.p) === String(target.page) && alpha(en.hw) === alpha(target.hw))))).join("");
+    const body = data.map(en => entryHTML(en, target && (target.eid != null ? en.eid === target.eid
+      : (String(en.p) === String(target.page) && alpha(en.hw) === alpha(target.hw))), vlabel)).join("");
+    return `<section class="rchunk">${div}${body}</section>`;
   }
 
   function renderTable(t) {               // structured columns/rows -> HTML (multi-level header via group)
@@ -266,24 +289,36 @@
     (t.footnotes || []).forEach(f => h += `<div class="rnote">${esc(f)}</div>`);
     return h;
   }
-  function entryHTML(en, hi) {
+  function entryHTML(en, hi, vlabel) {
     let h = `<article class="rentry${hi ? " hi" : ""}" data-eid="${en.eid}">`;
-    h += `<h4 class="rhw">${esc(en.hw)}${en.p ? ` <span class="rp">p.${en.p}</span>` : ""}</h4>`;
+    h += `<h4 class="rhw">${esc(en.hw)} <span class="rp">${esc(vlabel)}${en.p ? `, p.${en.p}` : ""}</span></h4>`;
     h += `<div class="rtext${en.k === "c" ? " rxref" : ""}">${esc(en.text)}</div>`;
     (en.tables || []).forEach(t => h += renderTable(t));
     return h + `</article>`;
   }
 
+  const MAXCHUNKS = 7;                     // keep the DOM bounded — unload chunks that scroll far out of view
   let ioTop, ioBot;
   async function loadMore(dir) {          // dir +1 = append next chunk, -1 = prepend previous (across volumes)
     if (RD.loading) return;
     const a = dir > 0 ? nextAddr(RD.hiVi, RD.hiCi) : prevAddr(RD.loVi, RD.loCi);
     if (!a) return;
     RD.loading = true;
-    const html = await addrHTML(a[0], a[1]);
-    const sc = $scroll(), ct = $content();
-    if (dir > 0) { ct.insertAdjacentHTML("beforeend", html); RD.hiVi = a[0]; RD.hiCi = a[1]; }
-    else { const h0 = sc.scrollHeight; ct.insertAdjacentHTML("afterbegin", html); RD.loVi = a[0]; RD.loCi = a[1]; sc.scrollTop += sc.scrollHeight - h0; }
+    const sc = $scroll(), ct = $content(), html = await addrHTML(a[0], a[1]);
+    if (dir > 0) {
+      ct.insertAdjacentHTML("beforeend", html); RD.hiVi = a[0]; RD.hiCi = a[1];
+      while (ct.children.length > MAXCHUNKS) {        // unload from the top; subtract its height to hold the viewport
+        const top = ct.firstElementChild, h = top.offsetHeight; top.remove(); sc.scrollTop -= h;
+        const n = nextAddr(RD.loVi, RD.loCi); RD.loVi = n[0]; RD.loCi = n[1];
+      }
+    } else {
+      const h0 = sc.scrollHeight; ct.insertAdjacentHTML("afterbegin", html); RD.loVi = a[0]; RD.loCi = a[1];
+      sc.scrollTop += sc.scrollHeight - h0;
+      while (ct.children.length > MAXCHUNKS) {        // unload from the bottom
+        ct.lastElementChild.remove();
+        const p = prevAddr(RD.hiVi, RD.hiCi); RD.hiVi = p[0]; RD.hiCi = p[1];
+      }
+    }
     RD.loading = false;
   }
   async function openReader(vol, page, hw, eid, rc) {
@@ -293,7 +328,7 @@
     let ci = rc;                          // prefer the exact reader-chunk baked into the place
     if (ci == null) { const m = await rGet(vtag, "manifest");
       ci = (m.page_index && m.page_index[String(page)] != null) ? m.page_index[String(page)] : 0; }
-    document.getElementById("reader-title").textContent = INDEX[vi].title;
+    document.getElementById("reader-title").textContent = "A Gazetteer of the World";   // fixed; volume shown per entry
     $content().innerHTML = await addrHTML(vi, ci, { eid, page, hw });
     RD.loVi = RD.hiVi = vi; RD.loCi = RD.hiCi = ci;
     showModal();
@@ -332,6 +367,61 @@
     try { count = (await pm.getMetadata())?.tilestats?.layers?.[0]?.count ?? null; } catch {}
     fillLegend(count);
   });
+
+  // ── Search: SQLite FTS5 over HTTP range requests (no server) — fuzzy names + full text ──────────
+  // Lazily spins up the sql.js-httpvfs worker on first query; the .sqlite is read by byte-range, so
+  // nothing downloads up front. Two indexes: a trigram headword index queried as overlapping 3-grams
+  // (typo/OCR-tolerant fuzzy place-name match) + a unicode61 full-text index (ranked, with snippets).
+  const trigrams = s => { s = (s || "").toLowerCase().replace(/[^a-z0-9]+/g, ""); const o = []; for (let i = 0; i + 3 <= s.length; i++) o.push(s.slice(i, i + 3)); return o; };
+  let DBW = null, searching = false;
+  const $res = () => document.getElementById("results");
+  const rstatus = t => { const r = $res(); r.innerHTML = `<div class="rs-status">${esc(t)}</div>`; r.hidden = false; };
+  async function searchDb() {
+    if (!DBW) {
+      rstatus("loading search index…");
+      DBW = await createDbWorker(
+        [{ from: "inline", config: { serverMode: "full", url: "./search/gotw-fts.sqlite", requestChunkSize: 4096 } }],
+        "./search/lib/sqlite.worker.js", "./search/lib/sql-wasm.wasm");
+    }
+    return DBW;
+  }
+  const ftsExpr = q => { const t = q.match(/[\p{L}\p{N}]+/gu) || []; return t.length ? t.map((w, i) => i === t.length - 1 ? `"${w}"*` : `"${w}"`).join(" AND ") : null; };
+  const fuzzyExpr = q => { const g = trigrams(q); return g.length ? g.map(t => `"${t}"`).join(" OR ") : null; };
+  const unmark = s => esc(s || "").replaceAll("", "<b>").replaceAll("", "</b>");
+  function resRow(r, sn) {
+    const loc = `${String(r.vol || "").replace("v", "Vol. ")}${r.page ? `, p.${r.page}` : ""}`;
+    return `<button class="rs-row" data-vol="${esc(String(r.vol || ""))}" data-page="${r.page ?? ""}" data-hw="${esc(r.headword || "")}"`
+      + ` data-eid="${r.eid}" data-rc="${r.rc ?? ""}"><span class="rs-hw">${esc(r.headword || "")}</span>`
+      + ` <span class="rs-loc">${esc(loc)}</span>${sn ? `<div class="rs-sn">${unmark(sn)}</div>` : ""}</button>`;
+  }
+  async function doSearch(q) {
+    q = q.trim();
+    if (q.length < 2) { $res().hidden = true; return; }
+    if (searching) return; searching = true;
+    try {
+      const w = await searchDb(), fz = fuzzyExpr(q), ex = ftsExpr(q);
+      const names = fz ? await w.db.query("SELECT d.eid,d.vol,d.page,d.rc,d.headword FROM hw JOIN doc d ON d.eid=hw.rowid WHERE hw MATCH ? ORDER BY rank LIMIT 8", [fz]) : [];
+      const full = ex ? await w.db.query("SELECT d.eid,d.vol,d.page,d.rc,d.headword, snippet(fts,1,char(2),char(3),'…',10) AS sn FROM fts JOIN doc d ON d.eid=fts.rowid WHERE fts MATCH ? ORDER BY rank LIMIT 12", [ex]) : [];
+      const seen = new Set(names.map(r => r.eid)), full2 = full.filter(r => !seen.has(r.eid));
+      let h = "";
+      if (names.length) h += `<div class="rs-sec">Place names (fuzzy)</div>` + names.map(r => resRow(r, null)).join("");
+      if (full2.length) h += `<div class="rs-sec">In the full text</div>` + full2.map(r => resRow(r, r.sn)).join("");
+      $res().innerHTML = h || `<div class="rs-status">No matches for “${esc(q)}”.</div>`;
+      $res().hidden = false;
+    } catch (e) { rstatus("search unavailable: " + ((e && e.message) || e)); }
+    searching = false;
+  }
+  (function wireSearch() {
+    const qi = document.getElementById("q"); if (!qi) return;
+    let t; qi.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => doSearch(qi.value), 220); });
+    qi.addEventListener("keydown", e => { if (e.key === "Escape") $res().hidden = true; });
+    $res().addEventListener("click", e => {
+      const b = e.target.closest(".rs-row"); if (!b) return;
+      $res().hidden = true;
+      openReader(b.dataset.vol, b.dataset.page, b.dataset.hw, b.dataset.eid ? +b.dataset.eid : null, b.dataset.rc !== "" ? +b.dataset.rc : null);
+    });
+    document.addEventListener("click", e => { if (!e.target.closest("#results") && e.target.id !== "q") $res().hidden = true; });
+  })();
   </script>
 </body>
 </html>
