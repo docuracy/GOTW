@@ -422,9 +422,11 @@
   async function loadPhon() {
     if (PHON.ready) return; if (PHON.loading) return PHON.loading;
     PHON.loading = (async () => {
-      ort.env.wasm.wasmPaths = "./lib/onnx/"; ort.env.wasm.numThreads = 1;
+      // absolute URLs: a relative wasmPaths resolves inside ort's own dir and doubles the path
+      ort.env.wasm.wasmPaths = new URL("./lib/onnx/", location.href).toString();
+      ort.env.wasm.numThreads = 1;
       const [sess, buf, meta, man, cv, lv, sv] = await Promise.all([
-        ort.InferenceSession.create("./search/symphonym.int8.onnx", { executionProviders: ["wasm"] }),
+        ort.InferenceSession.create(new URL("./search/symphonym.int8.onnx", location.href).toString(), { executionProviders: ["wasm"] }),
         fetch("./search/symphonym-embeddings.i8").then(r => r.arrayBuffer()),
         fetch("./search/symphonym-meta.json").then(r => r.json()),
         fetch("./search/symphonym-manifest.json").then(r => r.json()),
