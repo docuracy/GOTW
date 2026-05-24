@@ -13,7 +13,7 @@ Detail store layout (static, GitHub-Pages-friendly):
     python3 process/export_geojson.py --out /tmp/places.geojsonl   # + docs/detail/ shards
 """
 from __future__ import annotations
-import argparse, json, re, sqlite3
+import argparse, json, math, re, sqlite3
 from collections import defaultdict
 from pathlib import Path
 
@@ -43,6 +43,15 @@ def population(ext):
         if p.get("count") is not None:
             out.append(f"{p['count']:,}" + (f" ({p['year']})" if p.get("year") else ""))
     return "; ".join(out)
+
+
+def latest_pop(ext):
+    """Population count for the most recent year (else the last given) — drives marker size; None if absent."""
+    rows = [(p.get("year"), p.get("count")) for p in ext.get("population", []) if p.get("count") is not None]
+    if not rows:
+        return None
+    withyear = [(y, c) for y, c in rows if y is not None]
+    return max(withyear, key=lambda t: t[0])[1] if withyear else rows[-1][1]
 
 
 def hathi_url(vol, page):
@@ -124,11 +133,15 @@ def main():
     n = args.detail_shards
     shards: dict[int, dict] = defaultdict(dict)
     geo: dict = {}                       # eid -> [lon,lat,placeId]: a geocoded place opens on the map
+    pops = [latest_pop(json.loads(r["extraction"]) if r["extraction"] else {}) for r in rows]
+    maxp = max([c for c in pops if c] or [0])
     with out.open("w", encoding="utf-8") as f:
-        for r in rows:
+        for r, c in zip(rows, pops):
             p = props_of(r)
-            f.write(json.dumps(point(r["lon"], r["lat"], {k: p[k] for k in LIGHT_KEYS if k in p}),
-                               ensure_ascii=False) + "\n")
+            light = {k: p[k] for k in LIGHT_KEYS if k in p}
+            if c and maxp:               # population marker scaling: latest-year count -> 1.3×…3× radius (sqrt)
+                light["psize"] = round(1.3 + 1.7 * math.sqrt(c / maxp), 2)
+            f.write(json.dumps(point(r["lon"], r["lat"], light), ensure_ascii=False) + "\n")
             shards[p["id"] % n][str(p["id"])] = p
             if r["eid"] is not None:
                 geo[r["eid"]] = [round(r["lon"], 5), round(r["lat"], 5), p["id"]]
