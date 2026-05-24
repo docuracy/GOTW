@@ -39,6 +39,38 @@
       font-family:Georgia,serif; box-shadow:0 1px 5px rgba(0,0,0,.22); }
     .maplibregl-popup.tip .maplibregl-popup-tip { display:none; }
     .tip-name { font-weight:bold; color:var(--ink); }
+    /* popup actions */
+    .pop-actions { margin-top:.6rem; display:flex; gap:.7rem; align-items:center; flex-wrap:wrap; }
+    .read-btn { font-family:Georgia,serif; font-size:.8rem; cursor:pointer; background:#2a6f97; color:#fff;
+                border:none; border-radius:4px; padding:.3rem .6rem; }
+    .read-btn:hover { background:#225b7c; }
+    .src-link { font-size:.78rem; color:#2a6f97; }
+    /* full-entry reader modal */
+    .modal { position:fixed; inset:0; background:rgba(26,36,56,.55); display:flex; align-items:center;
+             justify-content:center; z-index:1000; }
+    .modal[hidden] { display:none; }
+    .modal-box { width:min(880px,94vw); height:88vh; background:var(--paper); border:1px solid var(--line);
+                 border-radius:8px; box-shadow:0 8px 40px rgba(0,0,0,.4); display:flex; flex-direction:column; overflow:hidden; }
+    .modal-head { display:flex; align-items:center; gap:1rem; padding:.6rem 1rem; border-bottom:1px solid var(--line); background:#efeadf; }
+    .modal-head span { font-size:1rem; font-weight:bold; }
+    #reader-close { margin-left:auto; border:none; background:none; font-size:1.3rem; cursor:pointer; color:#6b6452; line-height:1; }
+    .reader { overflow-y:auto; padding:1rem 1.4rem; flex:1; }
+    .rvol { text-align:center; font-weight:bold; font-size:1rem; color:#6b6452; background:#efeadf;
+            border-top:2px solid #c26b4a; border-bottom:1px solid var(--line); padding:.7rem; margin:.6rem -1.4rem 1rem; }
+    .rentry { padding:.45rem .7rem; margin:.2rem 0; border-left:3px solid transparent; scroll-margin-top:1rem; }
+    .rentry.hi { background:#fbf6e7; border-left-color:#c26b4a; }
+    .rhw { margin:0 0 .25rem; font-size:.95rem; letter-spacing:.02em; }
+    .rhw .rp { font-weight:normal; font-size:.72rem; color:#857d6c; font-style:italic; margin-left:.4rem; }
+    .rtext { font-size:.9rem; line-height:1.5; color:#2a2f3a; white-space:pre-wrap; }
+    .rtext.rxref { color:#6b6452; font-style:italic; }
+    .rtable { border-collapse:collapse; margin:.6rem 0; font-size:.8rem; font-family:system-ui,sans-serif; }
+    .rtable caption { text-align:left; font-style:italic; color:#6b6452; padding:.2rem 0; }
+    .rtable th, .rtable td { border:1px solid var(--line); padding:.15rem .4rem; text-align:right; }
+    .rtable th { background:#efeadf; text-align:center; }
+    .rtable th.blank { background:transparent; border:none; }
+    .rtable .unit { font-weight:normal; color:#857d6c; }
+    .rnote { font-size:.72rem; color:#857d6c; font-style:italic; margin-top:.1rem; }
+    #sentinel-top, #sentinel-bottom { height:1px; }
   </style>
 </head>
 <body>
@@ -49,6 +81,17 @@
   </header>
   <div class="wrap"><div id="map"></div>
     <div class="legend" id="legend"><b>Feature type</b></div>
+  </div>
+
+  <div class="modal" id="modal" hidden>
+    <div class="modal-box">
+      <div class="modal-head"><span id="reader-title"></span><button id="reader-close" title="Close (Esc)">✕</button></div>
+      <div class="reader" id="reader-scroll">
+        <div id="sentinel-top"></div>
+        <div id="reader-content"></div>
+        <div id="sentinel-bottom"></div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -95,7 +138,13 @@
     if (notes.length) h += `<dt>Notes</dt><dd><ul>${notes.map(n=>`<li>${esc(n)}</li>`).join("")}</ul></dd>`;
     h += `</dl><p class="src">Source: Vol.&nbsp;${p.vol ?? "?"}, p.&nbsp;${p.page ?? "—"}` +
          (p.headword && p.headword !== p.name ? ` (under <em>${esc(p.headword)}</em>)` : "") +
-         `<br>WHG match: ${whgLink(p.whg_id)}${p.whg_score!=null?` · score ${p.whg_score}`:""}</p></div>`;
+         `<br>WHG match: ${whgLink(p.whg_id)}${p.whg_score!=null?` · score ${p.whg_score}`:""}</p>`;
+    h += `<div class="pop-actions">`;
+    if (p.vol) h += `<button class="read-btn" data-vol="${esc(String(p.vol))}" data-page="${esc(String(p.page ?? ""))}"`
+                  + ` data-hw="${esc(p.headword || p.name || "")}"${p.eid != null ? ` data-eid="${p.eid}"` : ""}`
+                  + `${p.rc != null ? ` data-rc="${p.rc}"` : ""}>📖 Read full entry</button>`;
+    if (p.src) h += `<a class="src-link" href="${esc(p.src)}" target="_blank" rel="noopener">View source page ↗</a>`;
+    h += `</div></div>`;
     return h;
   }
 
@@ -174,6 +223,101 @@
     if (count != null) leg.insertAdjacentHTML("beforeend",
       `<div style="margin-top:.35rem;color:#857d6c">${count.toLocaleString()} places</div>`);
   }
+
+  // ── Full-entry reader modal — one continuous lazy-loaded reader across ALL volumes ──────────────
+  const alpha = s => (s || "").toUpperCase().replace(/[^A-Z]/g, "");
+  const rcache = new Map();
+  const rGet = (vtag, name) => {          // manifest or a numbered chunk; cached
+    const k = `${vtag}/${name}`;
+    if (!rcache.has(k)) rcache.set(k, fetch(`./reader/${vtag}/${name}.json`).then(r => r.json()));
+    return rcache.get(k);
+  };
+  let INDEX = null;                       // [{vol,title,chunks,count}] in reading order (v1…v7)
+  const readerIndex = async () => INDEX || (INDEX = await fetch("./reader/index.json").then(r => r.json()));
+  // global chunk address = [volumeIndex, chunkIndex]; next/prev step across volume boundaries
+  const nextAddr = (vi, ci) => ci + 1 < INDEX[vi].chunks ? [vi, ci + 1] : (vi + 1 < INDEX.length ? [vi + 1, 0] : null);
+  const prevAddr = (vi, ci) => ci > 0 ? [vi, ci - 1] : (vi > 0 ? [vi - 1, INDEX[vi - 1].chunks - 1] : null);
+  const RD = { loVi: 0, loCi: 0, hiVi: 0, hiCi: -1, loading: false };
+  const $scroll = () => document.getElementById("reader-scroll");
+  const $content = () => document.getElementById("reader-content");
+
+  async function addrHTML(vi, ci, target) {   // one chunk's HTML, prefixed with a volume divider at chunk 0
+    const data = await rGet(INDEX[vi].vol, ci);
+    const div = ci === 0 ? `<div class="rvol">${esc(INDEX[vi].title)}</div>` : "";
+    return div + data.map(en => entryHTML(en, target && (target.eid != null ? en.eid === target.eid
+      : (String(en.p) === String(target.page) && alpha(en.hw) === alpha(target.hw))))).join("");
+  }
+
+  function renderTable(t) {               // structured columns/rows -> HTML (multi-level header via group)
+    const cols = t.columns || [], groups = cols.map(c => (c && c.group) || "");
+    let h = `<table class="rtable">`;
+    if (t.title) h += `<caption>${esc(t.title)}</caption>`;
+    h += `<thead>`;
+    if (groups.some(g => g)) {
+      h += `<tr>`;
+      for (let i = 0; i < cols.length;) { const g = groups[i]; let s = 1;
+        while (i + s < cols.length && groups[i + s] === g) s++;
+        h += `<th colspan="${s}"${g ? "" : ' class="blank"'}>${esc(g)}</th>`; i += s; }
+      h += `</tr>`;
+    }
+    h += `<tr>` + cols.map(c => `<th>${esc((c && c.label) || "")}${c && c.unit ? ` <span class="unit">(${esc(c.unit)})</span>` : ""}</th>`).join("") + `</tr></thead>`;
+    h += `<tbody>` + (t.rows || []).map(r => `<tr>` + (r || []).map(x => `<td>${esc(x)}</td>`).join("") + `</tr>`).join("") + `</tbody></table>`;
+    if (t.source_note) h += `<div class="rnote">${esc(t.source_note)}</div>`;
+    (t.footnotes || []).forEach(f => h += `<div class="rnote">${esc(f)}</div>`);
+    return h;
+  }
+  function entryHTML(en, hi) {
+    let h = `<article class="rentry${hi ? " hi" : ""}" data-eid="${en.eid}">`;
+    h += `<h4 class="rhw">${esc(en.hw)}${en.p ? ` <span class="rp">p.${en.p}</span>` : ""}</h4>`;
+    h += `<div class="rtext${en.k === "c" ? " rxref" : ""}">${esc(en.text)}</div>`;
+    (en.tables || []).forEach(t => h += renderTable(t));
+    return h + `</article>`;
+  }
+
+  let ioTop, ioBot;
+  async function loadMore(dir) {          // dir +1 = append next chunk, -1 = prepend previous (across volumes)
+    if (RD.loading) return;
+    const a = dir > 0 ? nextAddr(RD.hiVi, RD.hiCi) : prevAddr(RD.loVi, RD.loCi);
+    if (!a) return;
+    RD.loading = true;
+    const html = await addrHTML(a[0], a[1]);
+    const sc = $scroll(), ct = $content();
+    if (dir > 0) { ct.insertAdjacentHTML("beforeend", html); RD.hiVi = a[0]; RD.hiCi = a[1]; }
+    else { const h0 = sc.scrollHeight; ct.insertAdjacentHTML("afterbegin", html); RD.loVi = a[0]; RD.loCi = a[1]; sc.scrollTop += sc.scrollHeight - h0; }
+    RD.loading = false;
+  }
+  async function openReader(vol, page, hw, eid, rc) {
+    await readerIndex();
+    const vtag = "v" + String(vol).replace(/^v/i, "");   // detail carries "5"; reader dir is "v5"
+    const vi = Math.max(0, INDEX.findIndex(v => v.vol === vtag));
+    let ci = rc;                          // prefer the exact reader-chunk baked into the place
+    if (ci == null) { const m = await rGet(vtag, "manifest");
+      ci = (m.page_index && m.page_index[String(page)] != null) ? m.page_index[String(page)] : 0; }
+    document.getElementById("reader-title").textContent = INDEX[vi].title;
+    $content().innerHTML = await addrHTML(vi, ci, { eid, page, hw });
+    RD.loVi = RD.hiVi = vi; RD.loCi = RD.hiCi = ci;
+    showModal();
+    ($content().querySelector(".rentry.hi") || $content().firstElementChild || {}).scrollIntoView?.({ block: "center" });
+  }
+  function showModal() {
+    document.getElementById("modal").hidden = false; document.body.style.overflow = "hidden";
+    ioTop = ioTop || new IntersectionObserver(es => es[0].isIntersecting && loadMore(-1), { root: $scroll() });
+    ioBot = ioBot || new IntersectionObserver(es => es[0].isIntersecting && loadMore(1), { root: $scroll() });
+    ioTop.observe(document.getElementById("sentinel-top"));
+    ioBot.observe(document.getElementById("sentinel-bottom"));
+  }
+  function hideModal() {
+    document.getElementById("modal").hidden = true; document.body.style.overflow = "";
+    ioTop && ioTop.disconnect(); ioBot && ioBot.disconnect();
+  }
+  document.addEventListener("click", e => {
+    const b = e.target.closest(".read-btn");
+    if (b) return openReader(b.dataset.vol, b.dataset.page, b.dataset.hw,
+                             b.dataset.eid != null ? +b.dataset.eid : null,
+                             b.dataset.rc != null ? +b.dataset.rc : null);
+    if (e.target.id === "modal" || e.target.id === "reader-close") hideModal();
+  });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") hideModal(); });
 
   map.on("load", async () => {
     const protocol = new pmtiles.Protocol();

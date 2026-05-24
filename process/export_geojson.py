@@ -22,6 +22,11 @@ AAT_LABEL = {c["aat_id"]: c["label"] for c in _CONCEPTS}
 AAT_FCLASS = {c["aat_id"]: c["fclass"] for c in _CONCEPTS}
 _VOL = re.compile(r"v(\w+?)(?:-ocr)?\.txt$|-v(\w+?)[-.]", re.I)
 LIGHT_KEYS = ("id", "name", "fclass")   # the only attributes baked into the vector tiles
+# Per-volume HathiTrust ids (the University of Minnesota scans we OCR'd) -> exact source-page deep links.
+HTIDS = {"1": "umn.31951001678068j", "2": "umn.31951001678069h", "3": "umn.31951001678070w",
+         "4": "umn.31951001678071u", "5": "umn.31951001678072s", "6": "umn.31951001678073q",
+         "7": "umn.31951001678074o"}
+_SEQMAP: dict[str, dict[int, int]] = {}   # vol -> {printed page -> HathiTrust image seq}, from OCR markers
 
 
 def volume_of(filename: str | None) -> str | None:
@@ -40,11 +45,19 @@ def population(ext):
     return "; ".join(out)
 
 
+def hathi_url(vol, page):
+    """Exact HathiTrust source-page link: seq = the page's image index from the OCR markers."""
+    seq = _SEQMAP.get(vol, {}).get(page) if page is not None else None
+    return f"https://babel.hathitrust.org/cgi/pt?id={HTIDS[vol]}&seq={seq}" if (vol in HTIDS and seq) else None
+
+
 def props_of(r):
     """Full popup property dict for a place row (drops empties)."""
     ext = json.loads(r["extraction"]) if r["extraction"] else {}
+    vol = volume_of(r["src_file"])
     p = {
         "id": r["pid"],
+        "eid": r["eid"],            # entry id -> the reader highlights this exact entry
         "name": r["name"],
         "type": AAT_LABEL.get(r["aat_type_id"], r["aat_type_id"] or "—"),
         "fclass": AAT_FCLASS.get(r["aat_type_id"], "?"),
@@ -55,13 +68,29 @@ def props_of(r):
         "variants": ", ".join(ext.get("variant_names", [])),
         "population": population(ext),
         "notes": ext.get("notes", [])[:4],
-        "vol": volume_of(r["src_file"]),
+        "vol": vol,
         "page": r["page_start"],
         "headword": r["headword_disp"],
         "whg_id": r["whg_match_id"],
         "whg_score": r["whg_score"],
+        "src": hathi_url(vol, r["page_start"]),
     }
     return {k: v for k, v in p.items() if v not in (None, "", [])}
+
+
+def load_seqmap(ocr_dir):
+    """vol -> {printed page -> HathiTrust image seq}, parsed from the OCR '## p. N (#seq)' markers."""
+    out, d = {}, Path(ocr_dir)
+    if not d.is_dir():
+        return out
+    pat = re.compile(r"## p\. (\d+) \(#(\d+)\)")
+    for f in d.glob("gotw-v*-ocr.txt"):
+        v, mp = volume_of(f.name), {}
+        for m in pat.finditer(f.read_text(encoding="utf-8", errors="ignore")):
+            mp.setdefault(int(m.group(1)), int(m.group(2)))    # first occurrence of a printed page wins
+        if v:
+            out[v] = mp
+    return out
 
 
 def point(lon, lat, props):
@@ -76,12 +105,15 @@ def main():
     ap.add_argument("--out", default="docs/places.geojsonl", help="light NDJSON features for tippecanoe")
     ap.add_argument("--detail-dir", default="docs/detail", help="sharded popup-detail store")
     ap.add_argument("--detail-shards", type=int, default=256, help="number of detail shard files")
+    ap.add_argument("--ocr-dir", default="txt", help="merged OCR .txt dir for HathiTrust seq deep-links")
     args = ap.parse_args()
+    global _SEQMAP
+    _SEQMAP = load_seqmap(args.ocr_dir)
     con = sqlite3.connect(args.db); con.row_factory = sqlite3.Row
 
     rows = con.execute(
-        "SELECT p.rowid AS pid, p.name, p.aat_type_id, p.lat, p.lon, p.whg_match_id, p.whg_score, "
-        "       p.extraction, e.page_start, e.headword_disp, s.filename AS src_file "
+        "SELECT p.rowid AS pid, p.entry_id AS eid, p.name, p.aat_type_id, p.lat, p.lon, p.whg_match_id, "
+        "       p.whg_score, p.extraction, e.page_start, e.headword_disp, s.filename AS src_file "
         "FROM place p LEFT JOIN entry e ON e.entry_id = p.entry_id "
         "LEFT JOIN source s ON s.source_id = e.source_id "
         "WHERE p.lat IS NOT NULL AND p.lon IS NOT NULL ORDER BY p.name").fetchall()
