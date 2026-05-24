@@ -165,6 +165,7 @@
       template: "explorer-report.yml",
       title: `[report] ${headword || "entry"}${loc ? " — " + loc : ""}`,
       headword: headword || "", location: loc, eid: String(eid ?? ""),
+      link: eid != null ? `${location.origin}${location.pathname}?entry=${eid}` : "",   // open this entry in the explorer
       meta: JSON.stringify({ eid: eid ?? null, vol: volLabel || null, page: page ?? null, headword: headword || null }),
     });
     return `https://github.com/docuracy/GOTW/issues/new?${qs.toString()}`;
@@ -394,6 +395,15 @@
     map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 7) });
     openPlacePopup(ll, +pid, name);
   }
+  async function openEntry(eidStr) {            // ?entry=<eid> deep link (e.g. from an error-report issue)
+    const eid = parseInt(eidStr, 10); if (!Number.isFinite(eid)) return;
+    await geocodedMap();
+    let row = null;                             // locate vol/page/rc/headword from the FTS doc table (covers all entries)
+    try { const w = await searchDb(); row = (await w.db.query("SELECT vol,page,rc,headword FROM doc WHERE eid=?", [eid]))[0]; } catch {}
+    const g = GEO[eid];
+    if (g) { const ll = [g[0], g[1]]; map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 7) }); openPlacePopup(ll, g[2], row && row.headword); }
+    else if (row) openReader(row.vol, row.page, row.headword, eid, row.rc);
+  }
   document.addEventListener("click", e => {
     const g = e.target.closest(".rgeo");
     if (g) return locateOnMap(g.dataset.lon, g.dataset.lat, g.dataset.pid, g.dataset.hw);
@@ -417,6 +427,8 @@
     let count = null;
     try { count = (await pm.getMetadata())?.tilestats?.layers?.[0]?.count ?? null; } catch {}
     fillLegend(count);
+    const ent = new URLSearchParams(location.search).get("entry");   // deep link from a report/share
+    if (ent) openEntry(ent);
   });
 
   // ── Search: SQLite FTS5 over HTTP range requests (no server) — fuzzy names + full text ──────────

@@ -108,6 +108,45 @@ the user's query and does cosine-KNN locally. Implications for the explorer:
 - **Provenance is a first-class feature**: per-record source-page deep links (derived here from the OCR's
   image-sequence markers) and full transcription access.
 
+### 2e. In-context error reporting — closing the curation loop
+Every popup and reader entry carries a **⚑ Report** link. In the demonstrator this is implemented with
+**zero backend**, leaning on GitHub:
+
+- the link opens a **pre-filled GitHub New-Issue** (an *Issue Form* template) — no token/OAuth/proxy in
+  the UI; GitHub handles identity, so **anyone with a GitHub account** can submit;
+- the template **auto-applies an `explorer-report` label** (curators filter on it), and a small
+  **labeler workflow** reads the ticked error type(s) and adds per-type labels
+  (`ocr`, `tables`, `geocoding`, `aat-typing`, `over-split`, `under-split`, `merged`, `other`) — these map
+  one-to-one onto pipeline stages, so a flag routes to the right fix;
+- each issue embeds a **machine-readable `meta` block** (`{eid, vol, page, headword}`) plus a
+  **`?entry=<eid>` deep link** back into the explorer, so (a) a coding agent can pull `label:explorer-report`
+  via the API, parse, and **cluster systemic problems** (e.g. OCR flags concentrated on a page range → targeted
+  re-OCR; geocoding flags by country → reconciliation bias), and (b) a triager clicks straight back to the
+  exact entry. Spot error → report → label/triage → land on the entry, with no moderation service to run.
+
+> **Limitation to flag for site-wide use: it requires a GitHub account.** That's fine — even ideal — for a
+> *developer/curator-facing demonstrator* and for technically-minded contributors, because it reuses GitHub's
+> auth, notifications, labels, and Projects for free. But it is a real barrier for the **general public** and
+> non-technical contributors, who shouldn't need to create a GitHub account to report that a place is in the
+> wrong country.
+
+**A WHG-Django site-wide model.** Because WHG is already a Django platform, a production, site-wide reporter
+should be **Django-native** rather than GitHub-bound:
+
+- **Lower barrier:** use WHG's own login, or allow **anonymous / email-only** reports (with light anti-spam),
+  so no third-party account is required.
+- **Integrated data model:** a `Correction`/`Report` model linked to the WHG place/record by its **stable id**,
+  carrying the *same error taxonomy and structured fields* as above — so the two systems are interoperable and a
+  report means the same thing whichever route it came in by.
+- **In-platform triage:** filter/moderate by type, dataset, and status in Django admin or a curator dashboard;
+  surface a discreet "reported" badge on affected records; support assignment and resolution states.
+- **Same downstream analysis:** expose the reports via an API/export so the **clustering agent** (and, if
+  desired, a GitHub-Issues bridge) can still look for systemic fixes — the analysis layer is unchanged.
+
+In short: **the GitHub-Issues route is the zero-infrastructure MVP and stays excellent for the dev/curation
+loop; the Django model is the inclusive, site-wide form.** Share the taxonomy and the structured payload between
+them and reports flow either way.
+
 ---
 
 ## Part 3 — Adaptability and limitations for other print gazetteers

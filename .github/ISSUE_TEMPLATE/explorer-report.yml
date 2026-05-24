@@ -19,6 +19,9 @@ body:
   - type: input
     id: eid
     attributes: { label: Entry id (eid) }
+  - type: input
+    id: link
+    attributes: { label: Open in the explorer, description: "Deep link back to this entry." }
   - type: checkboxes
     id: types
     attributes:
