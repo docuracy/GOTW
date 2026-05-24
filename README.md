@@ -40,7 +40,7 @@ The stages of *historical PDF → geolocated linked data*, and how this project 
 | **2. Model the target** | Decide the unit of interest and a controlled vocabulary for typing it. | Mine the *actual* descriptors for their categories; resolve to real Getty AAT ids and **validate every id** so a typo fails loudly. |
 | **3. Self-hosted LLM extraction** | Run every record through **self-hosted open models** for schema-constrained structured output. | Free (no per-token cost): a **primary extractor** (Llama-3.3-70B) + a **critic** (gpt-oss-120B) + a **repair** pass (Qwen3-thinking) on the flagged minority; closed AAT enum enforced; sharded across GPUs. Chosen by a 7-model A/B ([`docs/model-comparison.md`](docs/model-comparison.md)). |
 | **4. Reconcile / geolocate** | Match each place to WHG via a **3-pass cascade** (exact → phonetic → proximity). | Disambiguation context (country, printed coordinates) drives it; precision-first then recall, with a spatial bound so border/name changes don't pull in other-side-of-the-world matches. |
-| **5. Publish** | Export linked data; show it. | A small MapLibre demo on GitHub Pages communicates the result better than a data dump. |
+| **5. Publish** | Export linked data; explore it. | A static, server-less GitHub Pages explorer: PMTiles map + density heatmap, whole-corpus reader, in-browser search (FTS5 + trigram fuzzy + Symphonym phonetic via ONNX), in-context error reporting — all "fetch only what you need", no backend. |
 
 **Infrastructure dependency.** Stages 0 and 3 require the **Pitt CRC GPU cluster** (Slurm + vLLM,
 conda envs `whg`/`vllm`, fast `/vast/ishi` storage); stage 4 queries the WHG reconciliation service.
@@ -283,6 +283,13 @@ shards across GPUs (each shard serves the model on `localhost`, runs a concurren
 per-shard JSONL); `--ingest` merges them into `place` rows, **skipping any entry no longer in the DB**.
 Resumable + idempotent (the `llm_cache`/JSONL skip done work).
 
+> **Input is capped to the entry head (6,000 chars).** The classifiable fields (type, country, coordinates,
+> population) cluster at the start of an entry; the long tail is descriptive/historical prose. Left whole, the
+> multi-page country essays overflow the 32k context (`input + max_tokens > 32768` → HTTP 400) or truncate the
+> JSON mid-output — and crawl throughput. Capping the input to the head fixes the length-driven failures and is
+> cheap on quality (most entries are far shorter and untouched). Genuinely empty results (front matter / non-
+> place / garbled OCR) are left unextracted rather than forced.
+
 **Choosing the models — a 7-way A/B** (`process/ab_compare.py` → [`docs/model-comparison.md`](docs/model-comparison.md)).
 A deterministic sample through several configs (cache-reused, never touching `place`), scored on field
 coverage and inter-model agreement (no gold standard → agreement is a quality proxy). Findings:
@@ -389,17 +396,33 @@ handling the offset drift (16→80) caused by ~70 unpaginated steel plates that 
   mixed in. `process/pdf_coverage.py` reports each volume's head-word range so the seven tile A–Z without
   overlap or gap. (Tables/maps recover from the 600 dpi page images directly; the searchable per-volume
   PDF built by `process/build_pdf.py` is now mainly an archival artifact, since OCR reads the images.)
-- **MapLibre demo — PMTiles vector tiles** — a static GitHub Pages UI plotting the extracted, reconciled
-  places, live at [docuracy.github.io/GOTW/map.html](https://docuracy.github.io/GOTW/map.html). To scale
-  to the full corpus without shipping one huge file, `process/export_geojson.py` emits **light**
-  newline-delimited features (id/name/fclass only) + a **sharded detail store** (`docs/detail/<id%N>.json`
-  + `manifest.json`), and `process/build_tiles.sh` runs **tippecanoe** into `docs/places.pmtiles`. The map
-  reads tiles by viewport (PMTiles over HTTP range requests — no tile server). At **low zoom it draws a
-  density heatmap** (tippecanoe `--cluster-distance … -r1` bakes a `point_count` per low-zoom feature, which
-  weights the heatmap and keeps tiles light); this **cross-fades to individually clickable circles** as you
-  zoom in. Hover shows the **name** straight from the tile; **click fetches the full popup record** from the
-  cached detail shard. (The current demo is an early sample; it will be regenerated from the full Llama
-  extraction + 3-pass reconciliation.)
+- **A static, server-less explorer** — live at [docuracy.github.io/GOTW/map.html](https://docuracy.github.io/GOTW/map.html).
+  Everything is served from **GitHub Pages with no backend**, leaning on "fetch only what you need" formats. It
+  is deployed via a **GitHub Actions Pages artifact** (`.github/workflows/pages.yml`); the large generated files
+  live in a **GitHub Release** (`site-assets`, re-published by `process/publish_assets.sh`) so they're served
+  same-origin but kept out of git history. All JS libraries are **self-hosted** (`docs/lib/`, `docs/search/lib/`) —
+  no script CDNs (only the basemap *tiles* are third-party).
+  - **Map (PMTiles vector tiles).** `process/export_geojson.py` emits **light** NDJSON features (id/name/fclass,
+    a population factor, …) for `process/build_tiles.sh` → **tippecanoe** → `docs/places.pmtiles`, read by
+    viewport over HTTP range requests. **Low zoom = a density heatmap** (YlOrRd; weighted by the `point_count`
+    tippecanoe bakes via `--cluster-distance … -r1`) that **cross-fades to circles** as you zoom in; markers are
+    **scaled by population** (latest year, up to ~10×). Hover shows the name from the tile; **click fetches the
+    full record** from a **sharded detail store** (`docs/detail/<id%N>.json`).
+  - **Whole-corpus reader.** "Read full entry" opens a modal that **lazy-loads the transcription of all seven
+    volumes** (`process/export_reader.py` → chunked JSON + `index.json`), scrolled to the entry, DOM-windowed so
+    memory stays bounded; tables render inline; per-page **HathiTrust source-page** deep links.
+  - **In-browser search — three tiers, no server:** full-text via **SQLite FTS5 over HTTP range requests**
+    (`sql.js-httpvfs`; the DB is served as `…/gotw-fts.sqlite.png` so Pages won't gzip-break the ranges),
+    **trigram fuzzy** name match (typo/OCR-tolerant), and an opt-in **phonetic / cross-script** mode running
+    **Symphonym v7 in the browser** (an 8 MB int8 **ONNX** encoder via `onnxruntime-web` + precomputed int8
+    headword embeddings — `process/export_symphonym_onnx.py`, `process/build_symphonym_index.py`). A geocoded hit
+    flies the map + opens its popup; a non-geocoded hit opens the reader.
+  - **In-context curation.** Every popup and reader entry has a **⚑ Report** link → a pre-filled **GitHub issue**
+    (Issue Form, anyone with a GitHub account; auto-labelled `explorer-report`, a workflow adds per-type labels,
+    machine-readable `meta` + `?entry=` deep link for agent clustering). Popups/reader also **surface existing
+    reports** for the entry (cached Issues lookup). See [`WHG-LESSONS.md`](WHG-LESSONS.md) for the broader design.
+  - The current demo is an **early sample**; it regenerates from the full Llama extraction + 3-pass reconciliation
+    (one rebuild produces tiles + detail + reader + search + Symphonym embeddings + the HathiTrust links).
 
 > **Looking ahead — demographic change over time.** Extraction captures population as a structured
 > `[{year, count}]` time series (the source carries population figures in ~53% of entries, often for
