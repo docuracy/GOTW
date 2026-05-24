@@ -41,7 +41,10 @@ PROVIDER_MODELS = {
     "qwen": (os.environ.get("QWEN_MODEL", "Qwen/Qwen3-32B"),) * 2,
     "vllm": (os.environ.get("VLLM_MODEL", os.environ.get("QWEN_MODEL", "Qwen/Qwen3-32B")),) * 2,
 }
-MAX_TOKENS = 8192           # output cap (structured JSON per entry stays well under)
+MAX_TOKENS = 1536           # output cap. A real record is a few hundred tokens; this only bites RUNAWAY
+                            # generations (the schema's unbounded arrays let the model emit forever on
+                            # confusing/non-place entries) — capping low fails those fast instead of
+                            # generating 8192 tokens each (which saturated the server). Not in the cache key.
 
 # ---------------------------------------------------------------------------
 # AAT shortlist -> the closed set of feature-type ids the model may choose
