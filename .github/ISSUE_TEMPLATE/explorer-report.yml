@@ -1,0 +1,44 @@
+name: Data error report (from the explorer)
+description: Flag an OCR / table / geocoding / typing / segmentation error on a gazetteer entry.
+title: "[report] entry"
+labels: ["explorer-report"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Thanks for helping improve the data. This form was opened from the
+        [GOTW explorer](https://docuracy.github.io/GOTW/map.html); the entry fields below are
+        pre-filled — please **don't edit them** — just tick the error type(s) and add a note.
+        Anyone with a GitHub account can submit; curators triage these under the `explorer-report` label.
+  - type: input
+    id: headword
+    attributes: { label: Headword }
+  - type: input
+    id: location
+    attributes: { label: Source location (volume / page) }
+  - type: input
+    id: eid
+    attributes: { label: Entry id (eid) }
+  - type: checkboxes
+    id: types
+    attributes:
+      label: Error type(s)
+      options:
+        - label: OCR
+        - label: Tables
+        - label: Geocoding
+        - label: AAT typing
+        - label: Over-split
+        - label: Under-split
+        - label: Merged
+        - label: Other
+  - type: textarea
+    id: note
+    attributes:
+      label: Notes
+      description: What's wrong, and the correction if you know it.
+  - type: input
+    id: meta
+    attributes:
+      label: machine metadata (do not edit)
+      description: Structured locator for automated triage.

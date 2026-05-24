@@ -97,6 +97,8 @@
             border:1px solid #cfe0ea; border-radius:4px; padding:.05rem .4rem; vertical-align:middle; }
     .rgeo:hover { background:#d8e8f1; }
     .rnogeo { font-family:system-ui,sans-serif; font-size:.7rem; color:#a99e8a; font-style:italic; }
+    .report-link { font-family:system-ui,sans-serif; font-size:.72rem; color:#9a6b4a; text-decoration:none; }
+    .report-link:hover { text-decoration:underline; }
   </style>
 </head>
 <body>
@@ -154,6 +156,20 @@
   }
   const esc = s => (s||"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 
+  // Pre-filled GitHub "New issue" link (Issue Form template) — anyone with a GitHub account can file a
+  // data-error report; the template auto-labels it `explorer-report` and a labeler workflow adds the
+  // error-type labels. `meta` is a machine-readable block for a coding agent to cluster systemic issues.
+  function reportUrl(eid, headword, volLabel, page) {
+    const loc = `${volLabel || ""}${page ? `, p.${page}` : ""}`.replace(/^, /, "").trim();
+    const qs = new URLSearchParams({
+      template: "explorer-report.yml",
+      title: `[report] ${headword || "entry"}${loc ? " — " + loc : ""}`,
+      headword: headword || "", location: loc, eid: String(eid ?? ""),
+      meta: JSON.stringify({ eid: eid ?? null, vol: volLabel || null, page: page ?? null, headword: headword || null }),
+    });
+    return `https://github.com/docuracy/GOTW/issues/new?${qs.toString()}`;
+  }
+
   function popupHTML(p) {
     // MapLibre serialises array/object properties to JSON strings — parse notes back.
     let notes = p.notes;
@@ -173,6 +189,7 @@
                   + ` data-hw="${esc(p.headword || p.name || "")}"${p.eid != null ? ` data-eid="${p.eid}"` : ""}`
                   + `${p.rc != null ? ` data-rc="${p.rc}"` : ""}>📖 Read full entry</button>`;
     if (p.src) h += `<a class="src-link" href="${esc(p.src)}" target="_blank" rel="noopener">View source page ↗</a>`;
+    h += `<a class="report-link" href="${reportUrl(p.eid, p.headword || p.name, p.vol ? "Vol. " + p.vol : "", p.page)}" target="_blank" rel="noopener" title="Report a data error (GitHub)">⚑ Report</a>`;
     h += `</div></div>`;
     return h;
   }
@@ -226,11 +243,13 @@
     if (!_geoP) _geoP = fetch("./search/geocoded.json").then(r => r.ok ? r.json() : {}).then(g => (GEO = g)).catch(() => (GEO = {}));
     return _geoP;
   }
-  async function openPlacePopup(lngLat, id, name) {   // the map popup for a place (map click OR search result)
-    const popup = new maplibregl.Popup({ maxWidth: "320px" }).setLngLat(lngLat).addTo(map);
+  let placePopup = null;   // single shared popup so they don't accumulate
+  async function openPlacePopup(lngLat, id, name) {   // map popup for a place (map click OR search/reader)
+    if (placePopup) placePopup.remove();
+    const popup = placePopup = new maplibregl.Popup({ maxWidth: "320px" }).setLngLat(lngLat).addTo(map);
     popup.setHTML(`<div class="pop"><h3>${esc(name || "")}</h3><p class="meta">loading…</p></div>`);
-    try { popup.setHTML(popupHTML(await getDetail(id))); }
-    catch { popup.setHTML(`<div class="pop"><h3>${esc(name || "")}</h3><p class="meta">detail unavailable</p></div>`); }
+    try { const html = popupHTML(await getDetail(id)); if (popup === placePopup) popup.setHTML(html); }
+    catch { if (popup === placePopup) popup.setHTML(`<div class="pop"><h3>${esc(name || "")}</h3><p class="meta">detail unavailable</p></div>`); }
   }
 
   function addLayers() {
@@ -313,8 +332,9 @@
     const g = GEO && GEO[en.eid];   // [lon,lat,placeId] if geocoded
     const geo = g ? `<button class="rgeo" data-lon="${g[0]}" data-lat="${g[1]}" data-pid="${g[2]}" data-hw="${esc(en.hw)}" title="Geocoded — show on the map">📍 on map</button>`
                   : `<span class="rnogeo" title="Not geocoded">○ not located</span>`;
+    const rep = `<a class="report-link" href="${reportUrl(en.eid, en.hw, vlabel, en.p)}" target="_blank" rel="noopener" title="Report a data error (GitHub)">⚑</a>`;
     let h = `<article class="rentry${hi ? " hi" : ""}" data-eid="${en.eid}">`;
-    h += `<h4 class="rhw">${esc(en.hw)} <span class="rp">${esc(vlabel)}${en.p ? `, p.${en.p}` : ""}</span> ${geo}</h4>`;
+    h += `<h4 class="rhw">${esc(en.hw)} <span class="rp">${esc(vlabel)}${en.p ? `, p.${en.p}` : ""}</span> ${geo} ${rep}</h4>`;
     h += `<div class="rtext${en.k === "c" ? " rxref" : ""}">${esc(en.text)}</div>`;
     (en.tables || []).forEach(t => h += renderTable(t));
     return h + `</article>`;
