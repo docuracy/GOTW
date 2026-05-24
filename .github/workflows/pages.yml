@@ -9,7 +9,8 @@ name: Deploy Pages
 
 on:
   workflow_dispatch:
-  # push: { branches: [main] }      # ← uncomment after the cutover
+  push:
+    branches: [main]
 
 permissions:
   contents: read
