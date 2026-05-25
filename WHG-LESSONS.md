@@ -191,11 +191,16 @@ systems, and table styles.
 >   the **union maximises recall**. (An early *partial* triage run suggested geometry missed ~⅓ of tables —
 >   a sampling artifact; the un-triaged pages were almost all plain prose. Cautionary tale: never trust rates
 >   over an incomplete, non-random subset.)
-> - **Two negative results worth not re-litigating:** (1) **higher triage resolution doesn't help** (1024 vs
->   2048 px: 15 vs 14 / 20 — and the VLM is run-to-run *noisy* on marginal pages even at temperature 0); (2)
->   a **raw-pixel CV vertical-projection** detector would be the same geometric signal as our line-box gutters
->   and hit the same two blind spots — the residual errors (2-col table vs 2-col prose; map vs table) are
->   **content ambiguities no whitespace method can resolve**; only reading the cells (the VLM) settles them.
+> - **Higher triage resolution doesn't help** (1024 vs 2048 px: 15 vs 14 / 20 — and the VLM is run-to-run
+>   *noisy* on marginal pages even at temperature 0).
+> - **A raw-pixel CV vertical ink-projection is a viable, OCR-independent, GPU-free complementary detector**
+>   (tested): it **cleanly reveals multi-column tables** — including a full-width table the line-box detector
+>   *missed* (clean regular gutters in the projection) — so it genuinely adds recall there. But it does **not**
+>   resolve the **2-column-table-vs-2-column-prose** case (same single gutter as prose — content-bound, VLM
+>   territory), and **maps need a gutter-*sharpness/regularity* test** rather than a band count (their smooth
+>   ink gradient yields spurious bands). So: a good cheap recall-booster for multi-column/full-width tables and
+>   for porting to sources without a VLM — not a silver bullet. (Initial *reasoning* dismissed it as
+>   redundant; the *spike* corrected that — run the cheap experiment.)
 >
 > The durable pattern: **cache the OCR line-geometry per page** (re-derive layout on CPU, no re-OCR); keep the
 > geometry detector (it recalls tables well *and* routes cell text out of the prose, which a page-level VLM
