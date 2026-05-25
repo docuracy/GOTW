@@ -263,13 +263,16 @@
   };
   // Density heatmap for low zooms, weighted by the cluster point_count baked in by tippecanoe
   // (coalesce -> 1 for unclustered points). Fades out by ~z7.5 as the circles take over.
+  // tippecanoe clusters points onto an ~8px tile grid, so at low zoom a small radius leaves each
+  // cell's blob discrete -> a checkerboard. Keep the radius LARGE and FLAT at low zoom so neighbouring
+  // cells' gaussians overlap into continuous density; raise low-zoom intensity to offset the spread.
   const HEAT = {
-    "heatmap-weight": ["interpolate",["linear"],["coalesce",["get","point_count"],1], 1,.15, 80,1],
-    "heatmap-intensity": ["interpolate",["linear"],["zoom"], 0,.7, 7,1.6],
-    "heatmap-radius": ["interpolate",["linear"],["zoom"], 0,7, 7,26],
+    "heatmap-weight": ["interpolate",["linear"],["coalesce",["get","point_count"],1], 1,.2, 60,1],
+    "heatmap-intensity": ["interpolate",["linear"],["zoom"], 0,1.05, 4,1.15, 7,1.6],
+    "heatmap-radius": ["interpolate",["linear"],["zoom"], 0,15, 3,17, 5,22, 7,30],
     "heatmap-opacity": ["interpolate",["linear"],["zoom"], 5,.85, 7.5,0],
     "heatmap-color": ["interpolate",["linear"],["heatmap-density"],
-      0,"rgba(255,255,178,0)", .12,"rgba(255,237,160,.75)", .35,"#fed976", .5,"#feb24c",
+      0,"rgba(255,255,178,0)", .08,"rgba(255,237,160,.7)", .3,"#fed976", .5,"#feb24c",
       .65,"#fd8d3c", .8,"#fc4e2a", .9,"#e31a1c", 1,"#bd0026"]
   };
 
