@@ -165,9 +165,23 @@ of the machinery is genuinely source-agnostic:
 **Every print gazetteer has its own typography and structure, and that layer must be re-analysed and re-built
 each time.** For GOTW this meant: distinguishing standalone display headings from inline minor entries;
 healing hyphen-wrapped headwords; scrubbing recurrent library stamps; classifying several cross-reference
-forms; and — because the layout model can't see **unruled** 1856 tables — detecting tables by **digit density**
-and routing them out of the reading order. None of that transfers verbatim. A different work will have
-different column rules, delimiters, running-head formats, plates, abbreviation systems, and table styles.
+forms; and — because the layout model can't see **unruled** 1856 tables — detecting tables and full-page
+plates from the **line geometry** (persistent vertical gutters between narrow, populated columns; sparse/blank
+pages by ink + text density) and routing them out of the reading order. None of that transfers verbatim. A
+different work will have different column rules, delimiters, running-head formats, plates, abbreviation
+systems, and table styles.
+
+> **Lesson learned mid-project — prefer the VLM as the page-type detector.** The geometry heuristics are
+> precise and content-agnostic (they replaced an earlier digit-density rule that only ever caught *numeric*
+> tables), but they **under-recall**: a cheap **low-resolution full-page pass by a self-hosted VLM**
+> (Qwen2.5-VL) classifying each page *prose / plate / blank* + counting embedded tables/figures found tables
+> on ~21% of main-volume pages vs the geometry detector's ~14% — i.e. geometry **missed ~⅓ of table pages** —
+> and cleanly separated real illustration plates (maps/portraits) from blanks, which the geometry plate
+> detector lumped together. The durable pattern: **cache the OCR line-geometry per page** so layout decisions
+> can be re-derived on CPU without re-OCR, use the geometry detector only to *route cell/label text out of the
+> prose* (which a page-level VLM can't localise), and let the **VLM triage be the authoritative selector** for
+> the expensive high-res table-digitisation and plate-export passes. (Tables are digitised to a data-first
+> column/row schema by the same self-hosted VLM — no external API.)
 
 **The honest rule of thumb:** budget for a **layout-and-content analysis phase up front** for each new source,
 then assemble a *precise* workflow from the reusable components. The pipeline is a **kit, not a turnkey
@@ -179,7 +193,15 @@ ingester** — the kit is large and good, but the segmentation/table/typing rule
   (~9% on the hardest tranche here); plan a **repair pass** (higher token budget, or a critic + reasoning
   re-do) rather than assuming 100% yield.
 - **Reconciliation precision depends on disambiguation context** (country, printed coordinates); phonetic and
-  fuzzy matching widen recall but human QA remains necessary for the hard residue.
+  fuzzy matching widen recall but human QA remains necessary for the hard residue. The strongest lever here is
+  **hierarchical containment**: resolve each place's admin parents top-down to WHG ids that *have geometry*,
+  then constrain the (fuzzy) leaf match to inside that parent via the API's **`contained_in` + `relation`**
+  spatial filter — this stops a phonetic look-alike matching on the far side of the country (e.g. an Essex
+  parish landing in Ireland). `ccodes` is a reliable proxy for the country level; only sub-country parents
+  need id resolution.
+- **A cheap full-page VLM triage can fail systematically on a minority of pages** (here ~⅓ failed schema-
+  constrained generation and did *not* recover on a lighter-load re-run) — budget a diagnostic/repair loop
+  (relax the schema, log the failing responses) before trusting it as the sole detector.
 - **Non-Latin / multilingual sources** shift the balance — this is exactly where Symphonym's cross-script
   matching earns its place, and where client-side ONNX embeddings could most reduce gateway load.
 - **Infrastructure assumptions**: OCR and LLM stages here assume a Slurm/vLLM GPU cluster; the explorer
@@ -187,7 +209,33 @@ ingester** — the kit is large and good, but the segmentation/table/typing rule
 
 ---
 
+## Part 4 — Extension ideas
+
+Concrete next steps, in rough order of value-to-effort:
+
+1. **Richer AAT typing of attributes and secondary features.** The extraction currently types the *primary*
+   place. Prompt it to also categorise, against AAT, the **produce and manufactures** named in an entry
+   (e.g. wine, tallow, woollens → AAT material/product concepts) and to emit secondary typed features that the
+   prose mentions — **religions and religious buildings, battlefields / battle sites, fortifications, ports
+   and harbours**, etc. These become facets for search/filtering and additional reconcilable sub-entities,
+   turning each essay into several typed records rather than one.
+
+2. **Fix the low-zoom heatmap "checkerboard".** Tippecanoe quantises point locations to the tile grid, so at
+   low zoom the heatmap shows a regular checkerboard rather than smooth density. Mitigate purely in the
+   **front-end style** — increase the heatmap `intensity`/`radius` and soften the colour ramp at low zoom
+   (zoom-interpolated `heatmap-radius`/`heatmap-weight`), and/or add a small deterministic jitter to point
+   positions in the light tiles — so density reads continuously without re-quantising the data.
+
+3. **Condense the top bar into a single top-left control pane.** Replace the wide header with a compact
+   panel: a short **title**; an **ⓘ info button** opening a modal with the full project description + source
+   (RGS 1856, the self-OCR rationale, credits/origin); the **search input with its `phonetic` toggle**; and a
+   **dropdown to jump the reader** to any volume, any index letter within a volume, or any **Appendix**. A
+   second dropdown could index the **identified plates** (now that triage classifies them with `plate_kind`
+   and titles) and open them in the reader/lightbox — effectively a "list of illustrations/maps" per volume.
+
+---
+
 *Generated from the GOTW project; see `README.md` for the full pipeline and `process/` for the scripts behind
-each stage (`ocr_pages.py`, `parse_ocr.py`, `extract.py`, `reconcile.py`, `export_geojson.py`,
-`build_tiles.sh`, `export_reader.py`, `build_search_db.py`, `export_symphonym_onnx.py`,
-`build_symphonym_index.py`).*
+each stage (`ocr_pages.py`, `parse_ocr.py`, `extract.py`, `reconcile.py`, `triage_pages.py`,
+`extract_tables.py`, `export_plates.py`, `export_geojson.py`, `build_tiles.sh`, `export_reader.py`,
+`build_search_db.py`, `export_symphonym_onnx.py`, `build_symphonym_index.py`).*

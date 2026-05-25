@@ -48,15 +48,40 @@ def load_tables(con, source_filename):
     return out
 
 
+def load_page_tables(con, vtag):
+    """page(int) -> [table objs] for vision tables stored by volume+page (entry_id NULL). These are
+    spliced into reading order by page (the VLM digitises whole pages, not per-entry), parallel to plates."""
+    if not con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='table_data'").fetchone():
+        return {}
+    cols = {r[1] for r in con.execute("PRAGMA table_info(table_data)")}
+    if not {"volume", "page_start", "columns", "rows", "source_note", "footnotes"}.issubset(cols):
+        return {}
+    out: dict[int, list] = {}
+    for r in con.execute("SELECT page_start, subject, columns, rows, source_note, footnotes FROM table_data "
+                         "WHERE source='vision' AND volume=? AND page_start IS NOT NULL", (vtag,)):
+        p, subject, columns, rows, src, foot = r
+        out.setdefault(p, []).append({
+            "title": subject,
+            "columns": json.loads(columns) if columns else [],
+            "rows": json.loads(rows) if rows else [],
+            "source_note": src,
+            "footnotes": json.loads(foot) if foot else [],
+        })
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default="data/gotw_seg.sqlite")
     ap.add_argument("--out-dir", default="docs/reader")
     ap.add_argument("--vol", help="single volume tag, e.g. v5 (default: all)")
     ap.add_argument("--chunk-size", type=int, default=150)
+    ap.add_argument("--plates-manifest", default="docs/plates/manifest.json",
+                    help="illustration-plate manifest (from export_plates.py) to embed in the reader")
     args = ap.parse_args()
     con = sqlite3.connect(args.db); con.row_factory = sqlite3.Row
     cs = args.chunk_size
+    plates = json.loads(Path(args.plates_manifest).read_text()) if Path(args.plates_manifest).exists() else {}
 
     sources = con.execute("SELECT source_id, filename FROM source ORDER BY filename").fetchall()
     for s in sources:
@@ -72,22 +97,39 @@ def main():
             continue
         voldir = Path(args.out_dir) / vtag
         voldir.mkdir(parents=True, exist_ok=True)
-        page_index, chunk, buf, nchunks = {}, [], None, 0
 
         def flush(items, c):
             (voldir / f"{c}.json").write_text(json.dumps(items, ensure_ascii=False))
 
         entries = []
-        for i, r in enumerate(rows):
-            c = i // cs
-            if r["page_start"] is not None:
-                page_index.setdefault(str(r["page_start"]), c)   # first chunk a page appears in
+        for r in rows:
             e = {"eid": r["entry_id"], "hw": r["headword_disp"], "p": r["page_start"],
                  "k": "c" if r["kind"] == "crossref" else "e", "text": r["text"]}
             if r["entry_id"] in tables:
                 e["tables"] = tables[r["entry_id"]]
             entries.append(e)
 
+        # Splice illustration plates into reading order: each goes after the last entry of its
+        # `after_page`; any that don't match a page (e.g. front-matter plates) trail at the volume end.
+        by_page = {}
+        for pl in plates.get(vtag, []):
+            by_page.setdefault(str(pl["after_page"]), []).append(
+                {"k": "plate", "img": pl["img"], "kind": pl.get("kind"), "title": pl.get("title"), "p": pl["after_page"]})
+        if by_page:
+            spliced = []
+            for i, e in enumerate(entries):
+                spliced.append(e)
+                nextp = entries[i + 1]["p"] if i + 1 < len(entries) else None
+                if e["p"] is not None and e["p"] != nextp:
+                    spliced += by_page.pop(str(e["p"]), [])
+            for rem in by_page.values():                 # unmatched (after_page None / out of range)
+                spliced += rem
+            entries = spliced
+
+        page_index = {}                                   # page -> first chunk it appears in (post-splice)
+        for i, e in enumerate(entries):
+            if e.get("p") is not None:
+                page_index.setdefault(str(e["p"]), i // cs)
         nchunks = (len(entries) + cs - 1) // cs
         for c in range(nchunks):
             flush(entries[c * cs:(c + 1) * cs], c)

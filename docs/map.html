@@ -62,6 +62,14 @@
             border-top:2px solid #c26b4a; border-bottom:1px solid var(--line); padding:.7rem; margin:.6rem -1.4rem 1rem; }
     .rentry { padding:.45rem .7rem; margin:.2rem 0; border-left:3px solid transparent; scroll-margin-top:1rem; }
     .rentry.hi { background:#fbf6e7; border-left-color:#c26b4a; }
+    .rplate { margin:.8rem .7rem; text-align:center; }
+    .rplate img { max-width:min(100%,420px); max-height:300px; border:1px solid var(--line); background:#fff;
+                  cursor:zoom-in; box-shadow:0 1px 4px rgba(0,0,0,.15); }
+    .rplate figcaption { font-size:.78rem; color:#6b6452; font-style:italic; margin-top:.2rem; }
+    #lightbox { position:fixed; inset:0; z-index:9999; display:none; align-items:center; justify-content:center;
+                background:rgba(0,0,0,.9); cursor:zoom-out; }
+    #lightbox.on { display:flex; }
+    #lightbox img { max-width:96vw; max-height:96vh; box-shadow:0 0 30px rgba(0,0,0,.6); }
     .rhw { margin:0 0 .25rem; font-size:.95rem; letter-spacing:.02em; }
     .rhw .rp { font-weight:normal; font-size:.72rem; color:#857d6c; font-style:italic; margin-left:.4rem; }
     .rtext { font-size:.9rem; line-height:1.5; color:#2a2f3a; white-space:pre-wrap; }
@@ -382,6 +390,13 @@
     return h;
   }
   function entryHTML(en, hi, vlabel) {
+    if (en.k === "plate") {         // illustration plate spliced into reading order; click -> full-screen
+      const cap = esc(en.title || ({map:"Map", city_view:"View", portrait:"Portrait", scene:"Scene",
+                                     diagram:"Diagram"}[en.kind] || "Illustration plate"));
+      const tag = en.kind === "map" ? "🗺️ " : "🖼️ ";
+      return `<figure class="rplate"><img src="${en.img}" loading="lazy" alt="${cap}" data-full="${en.img}">`
+           + `<figcaption>${tag}${cap}${en.p ? ` — near p.${en.p}` : ""}</figcaption></figure>`;
+    }
     const g = GEO && GEO[en.eid];   // [lon,lat,placeId] if geocoded
     const geo = g ? `<button class="rgeo" data-lon="${g[0]}" data-lat="${g[1]}" data-pid="${g[2]}" data-hw="${esc(en.hw)}" title="Geocoded — show on the map">📍 on map</button>`
                   : `<span class="rnogeo" title="Not geocoded">○ not located</span>`;
@@ -465,7 +480,19 @@
     if (g) { const ll = [g[0], g[1]]; map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 7) }); openPlacePopup(ll, g[2], row && row.headword); }
     else if (row) openReader(row.vol, row.page, row.headword, eid, row.rc);
   }
+  function showLightbox(src) {              // full-screen plate viewer (superimposed over the reader)
+    let lb = document.getElementById("lightbox");
+    if (!lb) { lb = document.createElement("div"); lb.id = "lightbox"; lb.innerHTML = "<img>"; document.body.appendChild(lb); }
+    lb.querySelector("img").src = src; lb.classList.add("on");
+  }
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") { const lb = document.getElementById("lightbox"); if (lb) lb.classList.remove("on"); }
+  });
   document.addEventListener("click", e => {
+    const lb = e.target.closest("#lightbox");                 // click backdrop/image to close
+    if (lb) { lb.classList.remove("on"); return; }
+    const pimg = e.target.closest(".rplate img");             // click a plate -> full-screen
+    if (pimg) { showLightbox(pimg.dataset.full || pimg.src); return; }
     const rr = e.target.closest(".rrep");   // toggle the inline reports panel for a reader entry
     if (rr) {
       const art = rr.closest(".rentry"); if (!art) return;
