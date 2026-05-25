@@ -12,7 +12,9 @@ One row per entry, in the schema the rest of the pipeline (OCR correction → ex
 reconciliation) expects. This is the project's only parser: we OCR the public-domain scans
 ourselves and use no external transcript.
 
-    python3 process/parse_ocr.py data/txt/gotw-v1-ocr.txt --volume v1 --db data/gotw.sqlite
+    # canonical (stale-proof): build straight from the per-page OCR dir — the single source of truth
+    python3 process/parse_ocr.py --ocr-dir ocr/v1 --volume v1 --db data/gotw.sqlite
+    # legacy: a pre-merged .txt (parse warns unless it carries an ocr-merge provenance header)
     python3 process/parse_ocr.py data/txt/gotw-v1-ocr.txt --volume v1 --dry-run   # stats only
 """
 from __future__ import annotations
@@ -417,22 +419,41 @@ def load(db_path: Path, src_name: str, entries, back_matter=""):
     return con, sid
 
 
+def ocr_input_text(args) -> str:
+    """OCR text to parse. Prefer --ocr-dir (merge the per-page files in memory — the single source of
+    truth, so a stale merged .txt can never silently feed the pipeline). Else read the given .txt, but
+    warn if it lacks the ocr-merge provenance header (i.e. it wasn't produced by the current merge)."""
+    if args.ocr_dir:
+        import ocr_pages                                  # lazy: only this path needs PIL/ocr_pages
+        d = Path(args.ocr_dir)
+        if not d.is_dir():
+            sys.exit(f"not a directory: {d}")
+        return ocr_pages.merged_text(d)
+    if not args.ocr or not args.ocr.exists():
+        sys.exit("provide a merged OCR .txt, or --ocr-dir DIR (recommended)")
+    text = args.ocr.read_text(encoding="utf-8")
+    if not text.startswith("<!-- ocr-merge:"):
+        print(f"WARNING: {args.ocr} has no ocr-merge provenance header — it may be a stale/foreign "
+              f"merge. Prefer --ocr-dir, or re-run `ocr_pages.py --merge` then `--verify`.", file=sys.stderr)
+    return text
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("ocr", type=Path, help="merged OCR .txt from ocr_pages.py")
+    ap.add_argument("ocr", type=Path, nargs="?", help="merged OCR .txt (legacy; prefer --ocr-dir)")
+    ap.add_argument("--ocr-dir", help="per-page OCR dir (e.g. ocr/v1) — canonical, stale-proof input")
     ap.add_argument("--volume", required=True, help="volume tag, e.g. v1 (used as source name)")
     ap.add_argument("--db", type=Path, default=Path("data/gotw.sqlite"))
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
-    if not args.ocr.exists():
-        sys.exit(f"not found: {args.ocr}")
 
-    entries, back_matter = parse(args.ocr.read_text(encoding="utf-8"))
+    entries, back_matter = parse(ocr_input_text(args))
     n_entry = sum(1 for e in entries if e["kind"] == "entry")
     n_cross = sum(1 for e in entries if e["kind"] == "crossref")
     extra = sum(e["n_also"] for e in entries)
     pgs = [e["page_start"] for e in entries if e["page_start"] is not None]
-    print(f"{args.ocr.name}: {n_entry:,} entries · {n_cross:,} cross-refs · "
+    label = args.ocr_dir or (args.ocr.name if args.ocr else "?")
+    print(f"{label}: {n_entry:,} entries · {n_cross:,} cross-refs · "
           f"pages {min(pgs) if pgs else '?'}–{max(pgs) if pgs else '?'} · "
           f"+{extra:,} '—Also' places · {sum(e['tokens'] for e in entries):,} tokens")
     print("  sample headwords:", ", ".join(e["headword_disp"] for e in entries[:8]))

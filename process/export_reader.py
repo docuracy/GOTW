@@ -32,8 +32,8 @@ def load_tables(con, source_filename):
     if not con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='table_data'").fetchone():
         return {}
     cols = {r[1] for r in con.execute("PRAGMA table_info(table_data)")}
-    if "entry_id" not in cols:
-        return {}
+    if not {"entry_id", "subject", "columns", "rows", "source_note", "footnotes"}.issubset(cols):
+        return {}            # no digitised tables in this DB (table-vision pass not run, or pre-TableSet schema)
     out: dict[int, list] = {}
     for r in con.execute("SELECT entry_id, subject, columns, rows, source_note, footnotes FROM table_data "
                          "WHERE entry_id IS NOT NULL"):

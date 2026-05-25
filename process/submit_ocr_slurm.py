@@ -35,7 +35,7 @@ def count_pages(img_dir: str | None, pdf: str | None) -> int:
 
 
 def build_sbatch(*, source_arg: str, vol: str, out_dir: Path, n_pages: int, shard: int,
-                 partition: str, dpi: int, wall: str) -> tuple[str, int]:
+                 partition: str, dpi: int, wall: str, save_geom: bool = False) -> tuple[str, int]:
     n_shards = math.ceil(n_pages / shard)
     log_dir = _REPO / "logs"; log_dir.mkdir(parents=True, exist_ok=True)
     log_prefix = log_dir / f"gotw-ocr-{vol}-%A_%a"
@@ -71,6 +71,7 @@ def build_sbatch(*, source_arg: str, vol: str, out_dir: Path, n_pages: int, shar
         f"    {source_arg} \\",
         f"    --out-dir {out_dir} \\",
         f"    --dpi {dpi} \\",
+        ("    --save-geom \\" if save_geom else "    \\"),
         '    --start "$LO" --end "$HI"',
     ]
     return "\n".join(lines) + "\n", n_shards
@@ -86,6 +87,7 @@ def main():
     ap.add_argument("--partition", default="l40s", help="l40s | a100 | rtx6k | preempt")
     ap.add_argument("--dpi", type=int, default=220)
     ap.add_argument("--time", default="02:00:00")
+    ap.add_argument("--save-geom", action="store_true", help="cache per-page Surya geometry for GPU-free re-runs")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     if not args.img_dir and not args.pdf:
@@ -103,13 +105,16 @@ def main():
 
     script, n_shards = build_sbatch(
         source_arg=source_arg, vol=args.vol, out_dir=out_dir, n_pages=n_pages, shard=args.shard,
-        partition=args.partition, dpi=args.dpi, wall=args.time)
+        partition=args.partition, dpi=args.dpi, wall=args.time, save_geom=args.save_geom)
     sbatch_path = _REPO / "logs" / f"gotw-ocr-{args.vol}.sbatch"
     sbatch_path.parent.mkdir(parents=True, exist_ok=True)
     sbatch_path.write_text(script)
 
-    merge_cmd = (f"python3 process/ocr_pages.py {source_arg} "
-                 f"--out-dir {out_dir} --merge --out data/txt/gotw-{args.vol}-ocr.txt")
+    merged = f"data/txt/gotw-{args.vol}-ocr.txt"
+    merge_cmd = (f"python3 process/ocr_pages.py {source_arg} --out-dir {out_dir} --merge --out {merged}\n"
+                 f"  python3 process/ocr_pages.py --out-dir {out_dir} --out {merged} --verify   # gate: stale?\n"
+                 f"  # parse straight from the per-page dir (canonical, stale-proof):\n"
+                 f"  python3 process/parse_ocr.py --ocr-dir {out_dir} --volume {args.vol} --db <db>")
     print(f"{args.vol}: {n_pages} pages / shard {args.shard} = {n_shards} array tasks "
           f"on partition '{args.partition}' (1 GPU each)")
     print(f"per-page output -> {out_dir}")
