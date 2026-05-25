@@ -270,6 +270,16 @@ Concrete next steps, in rough order of value-to-effort:
    second dropdown could index the **identified plates** (now that triage classifies them with `plate_kind`
    and titles) and open them in the reader/lightbox — effectively a "list of illustrations/maps" per volume.
 
+4. **A georeferencer / reconciliation module in the UI — let users suggest matches and/or geometries.**
+   Automated reconciliation leaves a long tail (no confident WHG match, or a *wrong* one). Add a UI affordance
+   on each place: surface the candidate matches the cascade considered (and their `has_geom`/`contained_in`
+   context), let a user **confirm/override the WHG match** or **draw/drop a geometry** (point, or a polygon for
+   an area) when none exists. Submissions queue for review and feed back into the dataset — the human-in-the-loop
+   complement to the cascade, and the natural home for the same workflow the Issue-reporter + on-demand
+   table-reconstruction would use. Best built as the **gazetteer-agnostic human-QA module** (a small Django app)
+   so it serves any explorer, not just GOTW. Pairs with exposing the reconciliation API's candidate list +
+   `contained_in` to the front end.
+
 ---
 
 *Generated from the GOTW project; see `README.md` for the full pipeline and `process/` for the scripts behind
