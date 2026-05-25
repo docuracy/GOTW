@@ -201,6 +201,14 @@ systems, and table styles.
 >   ink gradient yields spurious bands). So: a good cheap recall-booster for multi-column/full-width tables and
 >   for porting to sources without a VLM — not a silver bullet. (Initial *reasoning* dismissed it as
 >   redundant; the *spike* corrected that — run the cheap experiment.)
+> - **Word-spacing / right-aligned-gap detector (tested, deferred).** Surya can emit word boxes
+>   (`RecognitionPredictor(..., return_words=True)`). The idea — wide gaps (vs the page's median word spacing)
+>   whose *cell-end x recurs* mark right-aligned numeric columns — gives **perfect precision** (zero false
+>   positives across maps/prose/lists, the best of any method) but **low recall** in a first cut; loosening it
+>   to right-edge clustering collapses precision. No clean sweet spot without combined signals + a corpus
+>   word-box re-OCR. Worth keeping as a **GPU-free high-precision confirmer** and for **on-demand retrospective
+>   table reconstruction** (re-OCR a *single* user-reported page with `return_words` — no corpus storage
+>   needed), not as a primary detector now.
 >
 > The durable pattern: **cache the OCR line-geometry per page** (re-derive layout on CPU, no re-OCR); keep the
 > geometry detector (it recalls tables well *and* routes cell text out of the prose, which a page-level VLM

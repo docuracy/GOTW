@@ -89,6 +89,7 @@ def main():
         if args.vol and vtag != args.vol:
             continue
         tables = load_tables(con, s["filename"])
+        page_tables = load_page_tables(con, vtag)        # vision tables (entry_id NULL), keyed by page
         rows = con.execute(
             "SELECT entry_id, headword_disp, page_start, kind, text FROM entry "
             "WHERE source_id=? AND kind IN('entry','crossref') AND text IS NOT NULL ORDER BY seq",
@@ -108,6 +109,20 @@ def main():
             if r["entry_id"] in tables:
                 e["tables"] = tables[r["entry_id"]]
             entries.append(e)
+
+        # Attach page-keyed vision tables (entry_id NULL) to the LAST entry of their page, so they
+        # render inline via the same e["tables"] path as entry-level tables. (Plates, below, splice as
+        # standalone items.) A page with tables but no entries is rare; such tables trail the volume end.
+        if page_tables:
+            seen_pages = set()
+            for i, e in enumerate(entries):
+                p = e.get("p")
+                nextp = entries[i + 1]["p"] if i + 1 < len(entries) else None
+                if p is not None and p != nextp and p in page_tables:
+                    e.setdefault("tables", []).extend(page_tables[p]); seen_pages.add(p)
+            orphan = [t for p, ts in page_tables.items() if p not in seen_pages for t in ts]
+            if orphan and entries:
+                entries[-1].setdefault("tables", []).extend(orphan)
 
         # Splice illustration plates into reading order: each goes after the last entry of its
         # `after_page`; any that don't match a page (e.g. front-matter plates) trail at the volume end.

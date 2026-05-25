@@ -257,6 +257,9 @@ def main():
                     help="select candidate pages from VLM page_triage (n_tables>0) instead of geometry table-bboxes")
     ap.add_argument("--triage-db", help="sqlite holding page_triage (default: --db)")
     ap.add_argument("--limit", type=int, help="cap candidates (testing)")
+    ap.add_argument("--skip-extracted", action="store_true",
+                    help="skip candidate pages that already have vision table_data (a prior run stored them); "
+                         "use to extend an existing run with new candidates without re-calling the VLM")
     ap.add_argument("--list-candidates", action="store_true", help="print candidates + scores, no API")
     ap.add_argument("--backend", choices=["gemini", "vllm"], help="table vision backend (default env/gemini)")
     ap.add_argument("--vl-model", help="vLLM vision model name (served-model-name)")
@@ -298,8 +301,9 @@ def main():
         ap.error("corpus mode needs --img-dir and --ocr (or use --page with --pdf)")
     files = sorted(p for p in Path(args.img_dir).iterdir() if p.suffix.lower() in IMG_EXTS)
     if args.from_triage:
-        # candidates from the VLM page-triage (n_tables>0) — better recall than the geometry detector,
-        # which misses ~1/3 of table pages. --ocr is still used only for the image-idx -> printed-page map.
+        # candidates from the VLM page-triage (n_tables>0) — complements the geometry detector (they agree
+        # on ~91% of table-pages but fail disjointly); union both for recall, the high-res extract self-filters
+        # FPs (map/list -> empty TableSet). --ocr is used only for the image-idx -> printed-page map.
         tdb = sqlite3.connect(args.triage_db or args.db)
         tset = {r[0]: r[1] for r in tdb.execute(
             "SELECT idx, n_tables FROM page_triage WHERE volume=? AND n_tables>0", (args.volume,))}
@@ -308,6 +312,12 @@ def main():
         cands = [(p, i, len(table_bboxes(t))) for p, i, t in parse_ocr(args.ocr)]
         cands = [(p, i, s) for p, i, s in cands if s >= args.thresh]   # >=1 table region on the page
     cands.sort(key=lambda x: -x[2])
+    if args.skip_extracted:
+        have = {p for (p,) in con.execute(
+            "SELECT DISTINCT page_start FROM table_data WHERE source='vision' AND volume=?", (args.volume,))}
+        before = len(cands)
+        cands = [(p, i, s) for p, i, s in cands if p not in have]
+        print(f"  --skip-extracted: {before - len(cands)} pages already in table_data, {len(cands)} remain")
     if args.limit:
         cands = cands[:args.limit]
     print(f"{len(cands)} candidate table pages (thresh {args.thresh}) of {len(files)} images")

@@ -62,7 +62,7 @@ def triage_one(jpeg: bytes) -> Optional[Triage]:
         "messages": [{"role": "user", "content": [
             {"type": "text", "text": PROMPT},
             {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()}}]}],
-        "max_tokens": 256, "temperature": 0,
+        "max_tokens": 96, "temperature": 0,    # fields come first; a whitespace-loop is cut short + salvaged
         "response_format": {"type": "json_schema", "json_schema": {"name": "Triage", "schema": SCHEMA, "strict": True}},
     }).encode()
     for attempt in range(4):
@@ -72,13 +72,13 @@ def triage_one(jpeg: bytes) -> Optional[Triage]:
             txt = json.load(urllib.request.urlopen(req, timeout=REQ_TIMEOUT))["choices"][0]["message"]["content"]
             try:
                 return Triage.model_validate_json(txt)
-            except Exception:                       # model sometimes wraps JSON in prose/markdown
-                m = re.search(r"\{.*\}", txt, re.S)
-                if m:
-                    return Triage.model_validate_json(m.group(0))
-                if not _SAMPLED:                    # log one bad payload so the failure mode is visible
-                    _SAMPLED.append(1); print(f"  [bad-payload] {txt[:160]!r}", file=sys.stderr, flush=True)
-                raise
+            except Exception:
+                t = _salvage(txt)                   # Qwen often emits the fields then loops on whitespace
+                if t is not None:                   # past max_tokens, truncating the JSON — pull fields by regex
+                    return t
+                if not _SAMPLED:
+                    _SAMPLED.append(1); print(f"  [bad-payload] {txt[:120]!r}", file=sys.stderr, flush=True)
+                return None                          # deterministic garbage; retrying won't help
         except Exception:
             if attempt == 3:
                 return None
@@ -86,6 +86,19 @@ def triage_one(jpeg: bytes) -> Optional[Triage]:
 
 
 _SAMPLED: list = []
+
+
+def _salvage(txt):
+    """Recover a Triage from malformed/truncated output (the common whitespace-loop case leaves the
+    fields intact but the object unterminated). Returns None only if even `type` is missing."""
+    ty = re.search(r'"type"\s*:\s*"(prose|plate|blank)"', txt)
+    if not ty:
+        return None
+    nt = re.search(r'"n_tables"\s*:\s*(\d+)', txt)
+    ni = re.search(r'"n_images"\s*:\s*(\d+)', txt)
+    pk = re.search(r'"plate_kind"\s*:\s*"(map|city_view|portrait|scene|diagram|other)"', txt)
+    return Triage(type=ty.group(1), n_tables=int(nt.group(1)) if nt else 0,
+                  n_images=int(ni.group(1)) if ni else 0, plate_kind=pk.group(1) if pk else None)
 
 
 def ensure_schema(con):

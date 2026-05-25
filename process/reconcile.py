@@ -18,8 +18,10 @@ thresholding on `score`; precision first, then progressively relaxed recall:
   Pass 4  phonetic, ccodes only                                             (parent had no geometry / none)
   Pass 5  phonetic, bounds=box around the printed coordinates               (coordinate-bearing fallback)
 
-`contained_in` is WHG's server-side containment (union of the named places' geometries, H3-`fuzzy`
-membership); far better than the padded centroid-bbox this previously used.
+`contained_in` is WHG's server-side containment (union of the named places' geometries); far better
+than the padded centroid-bbox this previously used. We request `containment="exact"` (precise Shapely
+polygon test): the `fuzzy` H3 mode currently returns 0 hits even for genuinely-contained places, while
+`exact` correctly admits in-region matches and rejects out-of-region phonetic look-alikes.
 
 Two backends (same cascade):
   * **gateway** (default) — POST directly to the Pitt ES gateway's `/api/reconcile`
@@ -118,11 +120,11 @@ def _gw_request(place, pass_cfg, parents, radius_km):
     if contain == "narrow":
         if not parents:
             return None
-        body.update(contained_in=[parents[-1]], containment="fuzzy", relation=relation)
+        body.update(contained_in=[parents[-1]], containment="exact", relation=relation)
     elif contain == "broad":
         if len(parents) < 2:
             return None
-        body.update(contained_in=[parents[-2]], containment="fuzzy", relation=relation)
+        body.update(contained_in=[parents[-2]], containment="exact", relation=relation)
     if coords:
         lat, lng = ext.get("latitude"), ext.get("longitude")
         if lat is None or lng is None:
@@ -164,6 +166,8 @@ def _norm(s):
 
 
 def _has_geom(hit):
+    # has_geom flags a POLYGON-type geometry — the only kind that can contain children (a point/line
+    # parent can't). The gateway must surface it in the /api/reconcile geometries (see WHG reconcile API).
     return any(g.get("has_geom") for g in (hit.get("geometries") or []))
 
 
@@ -179,7 +183,7 @@ def _resolve_one(name, cc, container_ids, threshold):
         if cc:
             body["ccodes"] = [cc]
         if container_ids:
-            body.update(contained_in=list(container_ids), containment="fuzzy", relation="intersects")
+            body.update(contained_in=list(container_ids), containment="exact", relation="intersects")
         resp = _post(f"{GATEWAY_URL}/api/reconcile", body)
         if not resp or "_error" in resp:
             continue
