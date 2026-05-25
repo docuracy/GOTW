@@ -7,14 +7,17 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "1/2  tar the reader store"
+echo "1/2  tar the reader store (+ plate images, if present)"
 tar -cf /tmp/reader.tar -C docs reader            # extracts back to docs/reader
+PLATES=()
+[ -d docs/plates ] && { tar -cf /tmp/plates.tar -C docs plates; PLATES=(/tmp/plates.tar); }   # -> docs/plates
 
 echo "2/2  upload to the 'site-assets' release (creating it if absent)"
 gh release view site-assets >/dev/null 2>&1 || \
   gh release create site-assets --title "Site assets" --notes "Large static assets for the Pages site, served same-origin but kept out of git history."
 gh release upload site-assets \
   /tmp/reader.tar \
+  "${PLATES[@]}" \
   docs/search/gotw-fts.sqlite.png \
   docs/search/symphonym.int8.onnx \
   docs/search/symphonym-embeddings.i8 \

@@ -33,3 +33,9 @@ __pycache__/
 .idea/
 data/jpeg/
 data/txt/
+docs/plates/
+
+# derived / local (not source)
+txt/
+.claude/
+data/*.sqlite

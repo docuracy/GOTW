@@ -46,6 +46,14 @@ _FOUND = _REC = _DET = _LAY = None
 TABLE_LABELS = {"Table"}
 FIGURE_LABELS = {"Picture", "Figure"}
 IMG_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
+# TODO (retire after triage validation): the VLM full-page triage (process/triage_pages.py) is a more
+# reliable page-type detector than the geometry table+plate detectors below — it finds ~1/3 more table
+# pages and cleanly separates plates from blanks. Once the full-coverage triage is validated, drive
+# table/plate handling from `page_triage` and reprocess per-page text from the cached geometry via
+# `--from-geom` (no GPU re-OCR). Keep only what triage CAN'T do: routing table cells / plate label-soup
+# out of the prose stream (triage gives page-level counts, not cell locations). See memory:
+# table-detection-recall-gap, no-external-llms-self-hosted-vlm.
+#
 # Surya's LayoutPredictor misses the UNRULED 1856 tables. We find them from the line GEOMETRY alone —
 # content-agnostic, so it catches statistical, linguistic concordance, and name-list tables alike
 # (unlike the old digit-density rule, which only ever caught numeric tables and false-fired on

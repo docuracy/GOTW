@@ -253,6 +253,9 @@ def main():
     ap.add_argument("--pdf", help="PDF source for single-page --page mode")
     ap.add_argument("--page", type=int, help="single printed page (uses --pdf)")
     ap.add_argument("--thresh", type=int, default=1, help="min table-bbox annotations to flag a table page")
+    ap.add_argument("--from-triage", action="store_true",
+                    help="select candidate pages from VLM page_triage (n_tables>0) instead of geometry table-bboxes")
+    ap.add_argument("--triage-db", help="sqlite holding page_triage (default: --db)")
     ap.add_argument("--limit", type=int, help="cap candidates (testing)")
     ap.add_argument("--list-candidates", action="store_true", help="print candidates + scores, no API")
     ap.add_argument("--backend", choices=["gemini", "vllm"], help="table vision backend (default env/gemini)")
@@ -290,12 +293,20 @@ def main():
             store(con, ts, volume=args.volume, page=args.page); show(ts)
         return
 
-    # ── corpus: candidate pages = those with table-bbox annotations recorded at OCR time ──
+    # ── corpus: candidate pages ──
     if not args.img_dir or not args.ocr:
         ap.error("corpus mode needs --img-dir and --ocr (or use --page with --pdf)")
     files = sorted(p for p in Path(args.img_dir).iterdir() if p.suffix.lower() in IMG_EXTS)
-    cands = [(p, i, len(table_bboxes(t))) for p, i, t in parse_ocr(args.ocr)]
-    cands = [(p, i, s) for p, i, s in cands if s >= args.thresh]   # >=1 table region on the page
+    if args.from_triage:
+        # candidates from the VLM page-triage (n_tables>0) — better recall than the geometry detector,
+        # which misses ~1/3 of table pages. --ocr is still used only for the image-idx -> printed-page map.
+        tdb = sqlite3.connect(args.triage_db or args.db)
+        tset = {r[0]: r[1] for r in tdb.execute(
+            "SELECT idx, n_tables FROM page_triage WHERE volume=? AND n_tables>0", (args.volume,))}
+        cands = [(p, i, tset[i]) for p, i, t in parse_ocr(args.ocr) if i in tset]
+    else:
+        cands = [(p, i, len(table_bboxes(t))) for p, i, t in parse_ocr(args.ocr)]
+        cands = [(p, i, s) for p, i, s in cands if s >= args.thresh]   # >=1 table region on the page
     cands.sort(key=lambda x: -x[2])
     if args.limit:
         cands = cands[:args.limit]

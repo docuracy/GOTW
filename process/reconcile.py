@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 """Reconciliation stage: geolocate `place` rows against WHG, as a cascade.
 
-Pass 0 (gateway only) first resolves each place's **admin hierarchy** top-down — country, then the
-LLM-extracted `admin_hierarchy` levels, broadest first — caching each parent's WHG footprint so the
-parent's bbox bounds the search for the next level down. This both (a) yields a spatial bound for the
-many coordinate-less parishes and (b) records the chain as Linked-Places `gvp:broaderPartitive`
-(partOf) relations to the parents' WHG ids (stored in `reconciliation.relations`, even when the leaf
-itself stays unmatched).
+Pass 0 (gateway only) first resolves each place's **admin hierarchy** top-down: the LLM-extracted
+`admin_hierarchy` levels, broadest first, each resolved to a WHG place id that HAS GEOMETRY (`has_geom`)
+and queried `contained_in` the previously-resolved parent — so we descend an actual nested region. The
+country level is handled by `ccodes` (a reliable proxy), not an id lookup. The chain is recorded as
+Linked-Places `gvp:broaderPartitive` (partOf) relations (stored in `reconciliation.relations`, even when
+the leaf stays unmatched).
 
-The leaf then runs the cascade — each pass on the previous one's misses (precision first, then
-recall), thresholding on `score`:
+The leaf then runs the cascade — each pass on the previous one's misses, `ccodes=[cc]` throughout,
+thresholding on `score`; precision first, then progressively relaxed recall:
 
-  Pass 1  EXACT    — mode='exact',    ccodes=[cc]                (strict text + strict country)
-  Pass 2  PHONETIC — mode='phonetic', ccodes=[cc]                (Symphonym KNN + strict country)
-  Pass 3  PROX     — mode='phonetic', no ccodes, bounds=box      (border/name changes, but a spatial
-                     box around the printed coordinates so matches can't come from the other side of
-                     the world). Runs only for places that printed coordinates.
-  Pass 4  PARENT   — mode='phonetic', ccodes=[cc], bounds=parent (coordinate-less places: bound by the
-                     reconciled immediate-parent footprint from Pass 0). Gateway/hierarchy only.
+  Pass 1  exact,    contained_in=[narrowest parent], relation=within        (strict text, strict region)
+  Pass 2  phonetic, contained_in=[narrowest parent], relation=intersects    (Symphonym within the parent —
+                    stops a phonetic look-alike matching on the far side of the country)
+  Pass 3  phonetic, contained_in=[next-broader parent]                      (relax the region outward)
+  Pass 4  phonetic, ccodes only                                             (parent had no geometry / none)
+  Pass 5  phonetic, bounds=box around the printed coordinates               (coordinate-bearing fallback)
+
+`contained_in` is WHG's server-side containment (union of the named places' geometries, H3-`fuzzy`
+membership); far better than the padded centroid-bbox this previously used.
 
 Two backends (same cascade):
   * **gateway** (default) — POST directly to the Pitt ES gateway's `/api/reconcile`
@@ -52,12 +54,16 @@ CHUNK = 25                # queries per DO-API POST (batched); gateway is one qu
 DEFAULT_THRESHOLD = 80
 DEFAULT_RADIUS_KM = 150
 
-# (label, mode, use_country, bound_src)   bound_src: "none" | "coords" (printed) | "parent" (admin geometry)
+# (label, mode, contain, relation, coords) — every pass also applies ccodes=[cc] when known (the reliable
+# country-level proxy). `contain`: None | "narrow" (innermost geometry-bearing parent) | "broad" (next
+# parent out); `relation`: WHG spatial relation for contained_in. Precision first (exact, within the
+# narrowest parent), then recall (phonetic within parent → relax outward → country-only → printed coords).
 PASSES = [
-    ("1-exact",     "exact",    True,  "none"),
-    ("2-phonetic",  "phonetic", True,  "none"),
-    ("3-proximity", "phonetic", False, "coords"),
-    ("4-parent",    "phonetic", True,  "parent"),   # coordinate-less places: bound by the reconciled admin parent
+    ("1-exact-in",   "exact",    "narrow", "within",     False),
+    ("2-phon-in",    "phonetic", "narrow", "intersects", False),
+    ("3-phon-broad", "phonetic", "broad",  "intersects", False),
+    ("4-phon-cc",    "phonetic", None,     None,         False),
+    ("5-coords",     "phonetic", None,     None,         True),
 ]
 
 
@@ -99,21 +105,29 @@ def _post(url, body, tok=None, tries=4):
 
 
 # ── gateway backend (direct /api/reconcile, single query, coords inline) ──────
-def _gw_request(place, mode, use_country, bound_src, radius_km, parent_bbox=None):
+def _gw_request(place, pass_cfg, parents, radius_km):
+    """Build one gateway query for a leaf place. `parents` = its geometry-bearing parent place ids,
+    broadest-first (narrowest last). Returns None when the pass's spatial constraint can't apply (e.g.
+    a 'narrow' pass for a place with no resolved parent), so that place falls through to a later pass."""
+    _, mode, contain, relation, coords = pass_cfg
     ext = json.loads(place["extraction"]) if place["extraction"] else {}
     body = {"query": place["name"], "mode": mode, "size": 5}
     cc = ext.get("country_code")
-    if use_country and cc:
-        body["ccodes"] = [cc]
-    if bound_src == "coords":
+    if cc:
+        body["ccodes"] = [cc]                              # country-level proxy, always on when known
+    if contain == "narrow":
+        if not parents:
+            return None
+        body.update(contained_in=[parents[-1]], containment="fuzzy", relation=relation)
+    elif contain == "broad":
+        if len(parents) < 2:
+            return None
+        body.update(contained_in=[parents[-2]], containment="fuzzy", relation=relation)
+    if coords:
         lat, lng = ext.get("latitude"), ext.get("longitude")
         if lat is None or lng is None:
             return None
         body["bounds"] = _bounds(lat, lng, radius_km)
-    elif bound_src == "parent":
-        if not parent_bbox:                 # only runs for places whose admin parent resolved to a footprint
-            return None
-        body["bounds"] = _poly_from_bbox(parent_bbox)
     return body
 
 
@@ -131,14 +145,13 @@ def _gw_top(hit_list, threshold):
     return {"id": top["place_id"], "name": top.get("title"), "score": top.get("score"), "coords": pt}
 
 
-# ── admin-hierarchy resolution (top-down, geometry-constraining) ──────────────
-# Resolve a place's admin parents broadest-first, caching each parent's WHG footprint, so a parent's
-# bbox bounds the search for the next level down — decisive for the parish majority that print no
-# coordinates — and the chain is recorded as Linked-Places `gvp:broaderPartitive` relations to the
-# parents' WHG ids. Gateway-only (the public API path keeps the plain 3-pass cascade).
-_PARENT_CACHE: dict = {}          # (norm_name, ccode, ancestor_bbox|None) -> {id,name,bbox,centroid,score} | None
-
-
+# ── admin-hierarchy resolution (top-down, server-side containment) ────────────
+# Resolve a place's admin parents broadest-first to WHG place ids that HAVE GEOMETRY (`has_geom`), each
+# query contained_in the previously-resolved parent so we descend an actual nested region — not a padded
+# bbox. The country level is left to `ccodes` (a reliable proxy), so only sub-country admin units are
+# resolved to ids. The leaf cascade then constrains matches with `contained_in=[parent id]`, and the
+# chain is recorded as Linked-Places `gvp:broaderPartitive` relations. Gateway-only.
+_PARENT_CACHE: dict = {}          # (norm_name, ccode, container_ids|None) -> {id,name,score} | None
 _PAREN = re.compile(r"\s*\([^)]*\)\s*$")    # drop a trailing type tag, e.g. "Fars (province)" -> "Fars"
 
 
@@ -150,104 +163,67 @@ def _norm(s):
     return " ".join((s or "").lower().split())
 
 
-def _iter_lonlat(coords):
-    """Yield (lon, lat) from any GeoJSON coordinate nesting (Point/Line/Polygon/Multi*)."""
-    if coords and isinstance(coords[0], (int, float)):
-        yield coords[0], coords[1]
-        return
-    for c in coords or []:
-        yield from _iter_lonlat(c)
+def _has_geom(hit):
+    return any(g.get("has_geom") for g in (hit.get("geometries") or []))
 
 
-def _bbox_of_hit(hit):
-    """[w,s,e,n] extent of a gateway hit — from its geometry if present, else its repr_point.
-    NB: confirm the gateway hit's geometry shape against a live response; falls back to centroid."""
-    xs, ys = [], []
-    for g in hit.get("geometries") or []:
-        geom = g.get("geometry") or (g if g.get("type") in ("Point", "Polygon", "MultiPolygon",
-                                                             "LineString", "MultiLineString") else None)
-        if geom and geom.get("coordinates"):
-            for lon, lat in _iter_lonlat(geom["coordinates"]):
-                xs.append(lon); ys.append(lat)
-        rp = g.get("repr_point")
-        if rp:
-            xs.append(rp[0]); ys.append(rp[1])
-    return [min(xs), min(ys), max(xs), max(ys)] if xs else None
-
-
-def _poly_from_bbox(bbox, pad_km=10):
-    w, s, e, n = bbox
-    d = pad_km / 111.0
-    return {"type": "Polygon", "coordinates": [[
-        [w - d, s - d], [e + d, s - d], [e + d, n + d], [w - d, n + d], [w - d, s - d]]]}
-
-
-def _resolve_one(name, cc, ancestor_bbox, threshold):
-    """Reconcile a single admin name against the gateway (exact then phonetic), inside a country and an
-    optional ancestor bbox. Cached per (name, cc, ancestor). Returns {id,name,bbox,centroid,score}|None."""
-    key = (_norm(name), cc, tuple(ancestor_bbox) if ancestor_bbox else None)
+def _resolve_one(name, cc, container_ids, threshold):
+    """Resolve one admin name to a WHG place id WITH GEOMETRY, within its country (ccodes) and inside the
+    already-resolved ancestor (`contained_in`). Cached per (name, cc, container). Returns {id,name,score}|None."""
+    key = (_norm(name), cc, tuple(container_ids) if container_ids else None)
     if key in _PARENT_CACHE:
         return _PARENT_CACHE[key]
     res = None
     for mode in ("exact", "phonetic"):
-        body = {"query": name, "mode": mode, "size": 5}
+        body = {"query": name, "mode": mode, "size": 8}
         if cc:
             body["ccodes"] = [cc]
-        if ancestor_bbox:
-            body["bounds"] = _poly_from_bbox(ancestor_bbox)
+        if container_ids:
+            body.update(contained_in=list(container_ids), containment="fuzzy", relation="intersects")
         resp = _post(f"{GATEWAY_URL}/api/reconcile", body)
         if not resp or "_error" in resp:
             continue
-        hits = resp.get("hits") or []
+        # only a geometry-bearing candidate can constrain children / be a usable container
+        hits = [h for h in (resp.get("hits") or []) if h.get("score", 0) >= threshold and _has_geom(h)]
         if not hits:
             continue
         top = max(hits, key=lambda h: h.get("score", 0))
-        if top.get("score", 0) < threshold:
-            continue
-        geos = top.get("geometries") or []
-        rp = geos[0]["repr_point"][:2] if (geos and geos[0].get("repr_point")) else None
-        res = {"id": top["place_id"], "name": top.get("title"), "bbox": _bbox_of_hit(top),
-               "centroid": rp, "score": top.get("score")}
+        res = {"id": top["place_id"], "name": top.get("title"), "score": top.get("score")}
         break
     _PARENT_CACHE[key] = res
     return res
 
 
 def resolve_hierarchy(rows, threshold):
-    """For each place resolve country -> admin parents (broadest first), each bounded by the previously
-    resolved level's bbox. Returns (parent_bboxes {pid: immediate-parent bbox for leaf bounding},
-    relations {pid: [LPF partOf rels]}). Sequential, but the cache collapses the shared parents (every
-    'England'/'Essex' is resolved once)."""
-    parent_bboxes, relations = {}, {}
+    """Per place: resolve its admin_hierarchy (broadest→narrowest) to geometry-bearing parent ids, each
+    contained_in the previous. Returns (parents {pid: [ids broadest-first]}, relations {pid: [LPF rels]}).
+    Sequential, but the cache collapses shared ancestors (every 'Essex' resolved once)."""
+    parents_by_pid, relations = {}, {}
     for r in rows:
         ext = json.loads(r["extraction"]) if r["extraction"] else {}
         cc = ext.get("country_code")
-        # chain broadest -> narrowest: country, then admin_hierarchy (assumed broad->narrow; verify on data)
         chain, seen = [], set()
-        raw = ([ext["country"]] if ext.get("country") else []) + (ext.get("admin_hierarchy") or [])
-        for name in (_clean_admin(n) for n in raw):
+        for name in (_clean_admin(n) for n in (ext.get("admin_hierarchy") or [])):
             if name and _norm(name) not in seen:
                 chain.append(name); seen.add(_norm(name))
-        rels, bound = [], None
+        ids, rels, container = [], [], []
         for name in chain:
-            par = _resolve_one(name, cc, bound, threshold)
+            par = _resolve_one(name, cc, container, threshold)
             if not par:
                 continue
+            ids.append(par["id"])
             rels.append({"relationType": "gvp:broaderPartitive", "relationTo": par["id"],
                          "label": par["name"], "when": None})
-            if par["bbox"]:
-                bound = par["bbox"]        # tighten the spatial bound for the next level down
-        if bound:
-            parent_bboxes[r["place_id"]] = bound
+            container = [par["id"]]        # next level must lie within this parent
+        if ids:
+            parents_by_pid[r["place_id"]] = ids
         if rels:
             relations[r["place_id"]] = rels
-    return parent_bboxes, relations
+    return parents_by_pid, relations
 
 
-def run_pass_gateway(rows, pass_cfg, threshold, concurrency, parent_bboxes=None):
-    _, mode, uc, bsrc, radius = pass_cfg
-    pb = parent_bboxes or {}
-    items = [(r, _gw_request(r, mode, uc, bsrc, radius, pb.get(r["place_id"]))) for r in rows]
+def run_pass_gateway(rows, pass_cfg, radius_km, threshold, concurrency, parents_by_pid):
+    items = [(r, _gw_request(r, pass_cfg, parents_by_pid.get(r["place_id"], []), radius_km)) for r in rows]
     items = [(r, b) for r, b in items if b is not None]
     best = {}
 
@@ -267,31 +243,32 @@ def run_pass_gateway(rows, pass_cfg, threshold, concurrency, parent_bboxes=None)
 
 
 # ── DO public-API backend (batched /reconcile, countries, extend centroids) ──
-# Keeps the plain cascade only: the "parent" bound source is gateway-only (no hierarchy here), so a
-# "parent" pass produces no queries and is skipped.
-def _api_request(place, mode, use_country, bound_src, radius_km):
+# No per-place hierarchy here (the W3C result carries no geometry/has_geom inline), so the containment
+# passes collapse: a "narrow" pass runs as country-only, "broad"/country-only passes are skipped as
+# redundant, and the coords pass uses bounds. Effectively exact-cc → phonetic-cc → coords.
+def _api_request(place, pass_cfg, radius_km):
+    _, mode, contain, relation, coords = pass_cfg
     ext = json.loads(place["extraction"]) if place["extraction"] else {}
     q = {"query": place["name"], "mode": mode, "limit": 5}
     cc = ext.get("country_code")
-    if use_country and cc:
+    if cc:
         q["countries"] = [cc]
-    if bound_src == "coords":
+    if coords:
         lat, lng = ext.get("latitude"), ext.get("longitude")
         if lat is None or lng is None:
             return None
         q["bounds"] = _bounds(lat, lng, radius_km)
-    elif bound_src == "parent":
+    elif contain != "narrow":          # "broad"/country-only passes duplicate the "narrow"→cc query here
         return None
     return q
 
 
-def run_pass_api(rows, pass_cfg, threshold, concurrency, tok):
-    _, mode, uc, bsrc, radius = pass_cfg
+def run_pass_api(rows, pass_cfg, radius_km, threshold, concurrency, tok):
     chunks = []
     for i in range(0, len(rows), CHUNK):
         queries = {}
         for r in rows[i:i + CHUNK]:
-            q = _api_request(r, mode, uc, bsrc, radius)
+            q = _api_request(r, pass_cfg, radius_km)
             if q is not None:
                 queries[f"q{r['place_id']}"] = q
         if queries:
@@ -333,27 +310,27 @@ def fetch_centroids_api(ids, tok):
 def reconcile(con, rows, backend, threshold, radius_km, concurrency, tok=None, hierarchy=True):
     # Pass 0: resolve admin hierarchies top-down (gateway only) so the leaf passes can be bounded by the
     # parent footprint, and so we can record the chain as LOD relations.
-    parent_bboxes, relations = {}, {}
+    parents_by_pid, relations = {}, {}
     use_hier = hierarchy and backend == "gateway"
     if use_hier:
-        print("resolving admin hierarchies (top-down, geometry-constrained) …", flush=True)
-        parent_bboxes, relations = resolve_hierarchy(rows, threshold)
-        print(f"  parent footprint for {len(parent_bboxes)}/{len(rows)} places; "
+        print("resolving admin hierarchies (top-down, server-side containment) …", flush=True)
+        parents_by_pid, relations = resolve_hierarchy(rows, threshold)
+        print(f"  geometry-bearing parent chain for {len(parents_by_pid)}/{len(rows)} places; "
               f"relations for {len(relations)}; {len(_PARENT_CACHE)} distinct parents cached", flush=True)
 
     matched = {}      # place_id -> (pass_label, candidate{id,name,score,coords})
-    for label, mode, uc, bsrc in PASSES:
-        if bsrc == "parent" and not use_hier:        # parent-bounded pass is hierarchy/gateway-only
+    for cfg in PASSES:
+        label, _, contain, _, _ = cfg
+        if contain in ("narrow", "broad") and not use_hier:   # containment passes need the resolved parents
             continue
         todo = [r for r in rows if r["place_id"] not in matched]
         if not todo:
             break
-        cfg = (label, mode, uc, bsrc, radius_km)
-        got = (run_pass_gateway(todo, cfg, threshold, concurrency, parent_bboxes) if backend == "gateway"
-               else run_pass_api(todo, cfg, threshold, concurrency, tok))
+        got = (run_pass_gateway(todo, cfg, radius_km, threshold, concurrency, parents_by_pid)
+               if backend == "gateway" else run_pass_api(todo, cfg, radius_km, threshold, concurrency, tok))
         for pid, cand in got.items():
             matched[pid] = (label, cand)
-        print(f"pass {label:12} on {len(todo):>6}  -> matched {len(got):>5}  "
+        print(f"pass {label:13} on {len(todo):>6}  -> matched {len(got):>5}  "
               f"(cumulative {len(matched)}/{len(rows)})", flush=True)
 
     if backend == "api":      # gateway already returned coords inline
@@ -380,9 +357,9 @@ def reconcile(con, rows, backend, threshold, radius_km, concurrency, tok=None, h
                         (json.dumps({"relations": rels}) if rels else None, now, pid))
     con.commit()
     by = lambda lbl: sum(1 for v in matched.values() if v[0] == lbl)
-    print(f"reconciled {len(matched)}/{len(rows)} via {backend} "
-          f"({by('1-exact')} exact, {by('2-phonetic')} phonetic, {by('3-proximity')} proximity, "
-          f"{by('4-parent')} parent-bounded); {sum(len(v) for v in relations.values())} partOf relations")
+    print(f"reconciled {len(matched)}/{len(rows)} via {backend} ("
+          + ", ".join(f"{by(c[0])} {c[0]}" for c in PASSES)
+          + f"); {sum(len(v) for v in relations.values())} partOf relations")
 
 
 DEMO = [
@@ -438,9 +415,13 @@ def main():
           f"{args.threshold}{', hierarchy-aware' if hier else ''}")
 
     if args.dry_run:
+        parents = ({} if (args.no_hierarchy or args.backend != "gateway")
+                   else resolve_hierarchy(rows[:8], args.threshold)[0])
         for r in rows[:8]:
-            req = _gw_request if args.backend == "gateway" else _api_request
-            qs = {lbl: req(r, m, uc, bsrc, args.radius_km) for lbl, m, uc, bsrc in PASSES}
+            if args.backend == "gateway":
+                qs = {c[0]: _gw_request(r, c, parents.get(r["place_id"], []), args.radius_km) for c in PASSES}
+            else:
+                qs = {c[0]: _api_request(r, c, args.radius_km) for c in PASSES}
             print(f"  {r['name'][:22]:22} {json.dumps(qs)}")
         print("(dry run: no calls)")
         return
