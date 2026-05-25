@@ -171,17 +171,39 @@ pages by ink + text density) and routing them out of the reading order. None of 
 different work will have different column rules, delimiters, running-head formats, plates, abbreviation
 systems, and table styles.
 
-> **Lesson learned mid-project — prefer the VLM as the page-type detector.** The geometry heuristics are
-> precise and content-agnostic (they replaced an earlier digit-density rule that only ever caught *numeric*
-> tables), but they **under-recall**: a cheap **low-resolution full-page pass by a self-hosted VLM**
-> (Qwen2.5-VL) classifying each page *prose / plate / blank* + counting embedded tables/figures found tables
-> on ~21% of main-volume pages vs the geometry detector's ~14% — i.e. geometry **missed ~⅓ of table pages** —
-> and cleanly separated real illustration plates (maps/portraits) from blanks, which the geometry plate
-> detector lumped together. The durable pattern: **cache the OCR line-geometry per page** so layout decisions
-> can be re-derived on CPU without re-OCR, use the geometry detector only to *route cell/label text out of the
-> prose* (which a page-level VLM can't localise), and let the **VLM triage be the authoritative selector** for
-> the expensive high-res table-digitisation and plate-export passes. (Tables are digitised to a data-first
-> column/row schema by the same self-hosted VLM — no external API.)
+> **Lesson learned mid-project — two independent detectors, complementary failures, and content is the only
+> tie-breaker.** We ended with two table/plate detectors and evaluated them hard. Findings (all verified on
+> data, including a 20-page human-counted disagreement sample):
+>
+> - **Surya's own layout `Table` class is unusable on unruled 19th-C tables.** `LayoutPredictor` returned
+>   **zero** `Table` regions across the obvious table pages; a `top_k=5` probe showed `Table` present only at
+>   **softmax-noise confidence (0.002–0.13)**, far behind `PageHeader`/`SectionHeader`/`Text` (0.4–0.9) and
+>   in nearly every region — **no threshold separates it**. It's a training-domain limit (the model expects
+>   ruled/modern tables), not a tunable. The one page it confidently called `Table` (0.46) was a clean
+>   full-width table. So the geometry detector wasn't reinventing something Surya does — Surya can't.
+> - **A geometry gutter detector (vertical whitespace between narrow populated columns) on the OCR line-boxes
+>   works well** — ~97% precision / ~95% recall — but its **false positives are MAPS** (scattered labels/
+>   coordinate ticks form column-like gutters) and it **misses 2-column & full-width tables** with few columns.
+> - **A cheap full-page VLM triage** (Qwen2.5-VL: *prose/plate/blank* + table/figure counts) is comparably
+>   accurate but **fails on disjoint cases**: it false-positives on **hanging-indent lists / structured prose**
+>   and misses multi-table pages and the Appendix concordance (which it reads as prose). At full coverage the
+>   two **agree on ~91%** of table-pages (804 of 879 vs triage's 853); each uniquely-right on a few dozen, so
+>   the **union maximises recall**. (An early *partial* triage run suggested geometry missed ~⅓ of tables —
+>   a sampling artifact; the un-triaged pages were almost all plain prose. Cautionary tale: never trust rates
+>   over an incomplete, non-random subset.)
+> - **Two negative results worth not re-litigating:** (1) **higher triage resolution doesn't help** (1024 vs
+>   2048 px: 15 vs 14 / 20 — and the VLM is run-to-run *noisy* on marginal pages even at temperature 0); (2)
+>   a **raw-pixel CV vertical-projection** detector would be the same geometric signal as our line-box gutters
+>   and hit the same two blind spots — the residual errors (2-col table vs 2-col prose; map vs table) are
+>   **content ambiguities no whitespace method can resolve**; only reading the cells (the VLM) settles them.
+>
+> The durable pattern: **cache the OCR line-geometry per page** (re-derive layout on CPU, no re-OCR); keep the
+> geometry detector (it recalls tables well *and* routes cell text out of the prose, which a page-level VLM
+> can't); use the **VLM triage as a cross-check + the authoritative selector for plate/figure handling**;
+> **union** geometry+triage for table candidates and let the **high-res VLM table-extraction self-filter** the
+> false positives (a map/list candidate → empty `TableSet`, harmless); and **suppress the geometry table flag
+> on triage-`plate` pages** to kill its map false-positives. (Tables digitise to a data-first column/row schema
+> by the same self-hosted VLM — no external API.)
 
 **The honest rule of thumb:** budget for a **layout-and-content analysis phase up front** for each new source,
 then assemble a *precise* workflow from the reusable components. The pipeline is a **kit, not a turnkey
@@ -199,9 +221,11 @@ ingester** — the kit is large and good, but the segmentation/table/typing rule
   spatial filter — this stops a phonetic look-alike matching on the far side of the country (e.g. an Essex
   parish landing in Ireland). `ccodes` is a reliable proxy for the country level; only sub-country parents
   need id resolution.
-- **A cheap full-page VLM triage can fail systematically on a minority of pages** (here ~⅓ failed schema-
-  constrained generation and did *not* recover on a lighter-load re-run) — budget a diagnostic/repair loop
-  (relax the schema, log the failing responses) before trusting it as the sole detector.
+- **A cheap full-page VLM triage can fail systematically on a minority of pages** — here ~⅓ of pages were
+  lost not to load but to the model **looping on whitespace past `max_tokens`** under strict guided JSON,
+  leaving the object unterminated. The fix that took it to 100% coverage was a **field-level regex salvage**
+  (pull the values even from truncated output) + a smaller token cap; log a failing payload early to spot the
+  mode. Lesson: don't trust a guided-JSON VLM to always emit valid JSON — parse defensively.
 - **Non-Latin / multilingual sources** shift the balance — this is exactly where Symphonym's cross-script
   matching earns its place, and where client-side ONNX embeddings could most reduce gateway load.
 - **Infrastructure assumptions**: OCR and LLM stages here assume a Slurm/vLLM GPU cluster; the explorer
