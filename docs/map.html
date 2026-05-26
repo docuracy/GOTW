@@ -82,10 +82,15 @@
     .rplate img { max-width:min(100%,420px); max-height:300px; border:1px solid var(--line); background:#fff;
                   cursor:zoom-in; box-shadow:0 1px 4px rgba(0,0,0,.15); }
     .rplate figcaption { font-size:.78rem; color:#6b6452; font-style:italic; margin-top:.2rem; }
-    #lightbox { position:fixed; inset:0; z-index:9999; display:none; align-items:center; justify-content:center;
-                background:rgba(0,0,0,.9); cursor:zoom-out; }
-    #lightbox.on { display:flex; }
-    #lightbox img { max-width:96vw; max-height:96vh; box-shadow:0 0 30px rgba(0,0,0,.6); }
+    #lightbox { position:fixed; inset:0; z-index:9999; display:none; background:rgba(0,0,0,.92); overflow:hidden; cursor:zoom-out; }
+    #lightbox.on { display:block; }
+    #lightbox img { position:absolute; top:0; left:0; transform-origin:0 0; max-width:none; max-height:none;
+                    box-shadow:0 0 30px rgba(0,0,0,.6); cursor:grab; user-select:none; -webkit-user-drag:none; }
+    #lightbox.dragging img { cursor:grabbing; }
+    #lightbox .lb-close { position:absolute; top:8px; right:16px; z-index:2; background:none; border:none;
+                          color:#ddd; font-size:1.7rem; line-height:1; cursor:pointer; }
+    #lightbox .lb-hint { position:absolute; bottom:10px; left:0; right:0; text-align:center; pointer-events:none;
+                         color:#aaa; font:12px system-ui,sans-serif; text-shadow:0 1px 2px #000; }
     .rhw { margin:0 0 .25rem; font-size:.95rem; letter-spacing:.02em; }
     .rhw .rp { font-weight:normal; font-size:.72rem; color:#857d6c; font-style:italic; margin-left:.4rem; }
     .rtext { font-size:.9rem; line-height:1.5; color:#2a2f3a; white-space:pre-wrap; }
@@ -540,18 +545,49 @@
     if (g) { const ll = [g[0], g[1]]; map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 7) }); openPlacePopup(ll, g[2], row && row.headword); }
     else if (row) openReader(row.vol, row.page, row.headword, eid, row.rc);
   }
-  function showLightbox(src) {              // full-screen plate viewer (superimposed over the reader)
+  // Zoomable full-screen plate viewer: scroll to zoom (about the cursor), drag to pan, double-click to reset.
+  const LB = { s: 1, tx: 0, ty: 0, nw: 0, nh: 0, drag: null };
+  const lbImg = () => document.getElementById("lightbox").querySelector("img");
+  function lbApply() { lbImg().style.transform = `translate(${LB.tx}px,${LB.ty}px) scale(${LB.s})`; }
+  function lbFit() {                        // scale the image to fit the viewport, centred
+    const vw = innerWidth, vh = innerHeight;
+    LB.s = Math.min(vw / LB.nw, vh / LB.nh, 1) * 0.96 || 1;
+    LB.tx = (vw - LB.nw * LB.s) / 2; LB.ty = (vh - LB.nh * LB.s) / 2; lbApply();
+  }
+  function lbWire(lb) {
+    lb.addEventListener("wheel", e => {     // zoom about the cursor (keep the point under it fixed)
+      e.preventDefault();
+      const ns = Math.min(Math.max(LB.s * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 0.05), 16);
+      LB.tx = e.clientX - (e.clientX - LB.tx) * (ns / LB.s);
+      LB.ty = e.clientY - (e.clientY - LB.ty) * (ns / LB.s);
+      LB.s = ns; lbApply();
+    }, { passive: false });
+    lb.querySelector("img").addEventListener("mousedown", e => {   // drag to pan
+      e.preventDefault(); LB.drag = [e.clientX - LB.tx, e.clientY - LB.ty]; lb.classList.add("dragging");
+    });
+    window.addEventListener("mousemove", e => { if (!LB.drag) return; LB.tx = e.clientX - LB.drag[0]; LB.ty = e.clientY - LB.drag[1]; lbApply(); });
+    window.addEventListener("mouseup", () => { LB.drag = null; lb.classList.remove("dragging"); });
+    lb.querySelector("img").addEventListener("dblclick", e => { e.preventDefault(); lbFit(); });
+    lb.querySelector(".lb-close").addEventListener("click", () => lb.classList.remove("on"));
+    lb.addEventListener("mousedown", e => { if (e.target === lb) lb.classList.remove("on"); });   // backdrop closes
+  }
+  function showLightbox(src) {
     let lb = document.getElementById("lightbox");
-    if (!lb) { lb = document.createElement("div"); lb.id = "lightbox"; lb.innerHTML = "<img>"; document.body.appendChild(lb); }
-    lb.querySelector("img").src = src; lb.classList.add("on");
+    if (!lb) {
+      lb = document.createElement("div"); lb.id = "lightbox";
+      lb.innerHTML = '<button class="lb-close" title="Close (Esc)">✕</button><img>'
+        + '<div class="lb-hint">scroll to zoom · drag to pan · double-click to reset · Esc to close</div>';
+      document.body.appendChild(lb); lbWire(lb);
+    }
+    const img = lb.querySelector("img");
+    img.onload = () => { LB.nw = img.naturalWidth || 1; LB.nh = img.naturalHeight || 1; lbFit(); };
+    img.src = src; lb.classList.add("on");
   }
   document.addEventListener("keydown", e => {
     if (e.key === "Escape") { const lb = document.getElementById("lightbox"); if (lb) lb.classList.remove("on"); }
   });
   document.addEventListener("click", e => {
-    const lb = e.target.closest("#lightbox");                 // click backdrop/image to close
-    if (lb) { lb.classList.remove("on"); return; }
-    const pimg = e.target.closest(".rplate img");             // click a plate -> full-screen
+    const pimg = e.target.closest(".rplate img");             // click a plate -> zoomable full-screen viewer
     if (pimg) { showLightbox(pimg.dataset.full || pimg.src); return; }
     const rr = e.target.closest(".rrep");   // toggle the inline reports panel for a reader entry
     if (rr) {
