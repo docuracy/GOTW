@@ -11,6 +11,8 @@ echo "1/2  tar the reader store (+ plate images, if present)"
 tar -cf /tmp/reader.tar -C docs reader            # extracts back to docs/reader
 PLATES=()
 [ -d docs/plates ] && { tar -cf /tmp/plates.tar -C docs plates; PLATES=(/tmp/plates.tar); }   # -> docs/plates
+GEOM=()
+[ -f docs/geometry.pmtiles ] && GEOM=(docs/geometry.pmtiles)   # WHG line/polygon tileset (~42MB) -> docs/geometry.pmtiles
 
 echo "2/2  upload to the 'site-assets' release (creating it if absent)"
 gh release view site-assets >/dev/null 2>&1 || \
@@ -18,6 +20,7 @@ gh release view site-assets >/dev/null 2>&1 || \
 gh release upload site-assets \
   /tmp/reader.tar \
   "${PLATES[@]}" \
+  "${GEOM[@]}" \
   docs/search/gotw-fts.sqlite.png \
   docs/search/symphonym.int8.onnx \
   docs/search/symphonym-embeddings.i8 \
@@ -25,4 +28,4 @@ gh release upload site-assets \
   docs/search/symphonym-manifest.json \
   --clobber
 
-echo "done — reader + FTS DB + Symphonym (onnx/embeddings/meta/manifest) published to release 'site-assets'"
+echo "done — reader + plates + geometry.pmtiles + FTS DB + Symphonym published to release 'site-assets'"

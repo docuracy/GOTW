@@ -133,12 +133,40 @@ def _gw_request(place, pass_cfg, parents, radius_km):
     return body
 
 
-def _gw_top(hit_list, threshold):
+# Non-point tie-break: when the best hit is a point but a POLYGON-bearing candidate (has_geom) sits within
+# GEOM_MARGIN of the top score, prefer the polygon — richer geometry + better map display, without reaching
+# past a clearly-better match. Tunable via GOTW_GEOM_MARGIN. Set GOTW_MEASURE=1 to log every match's
+# top-vs-best-polygon gap (no behaviour change) for impact analysis; dumped on exit to GOTW_MEASURE_OUT.
+GEOM_MARGIN = float(os.environ.get("GOTW_GEOM_MARGIN", "1"))
+_MEASURE_ON = os.environ.get("GOTW_MEASURE") == "1"
+_MEASURE: list = []
+if _MEASURE_ON:
+    import atexit
+    atexit.register(lambda: open(os.environ.get("GOTW_MEASURE_OUT", "/tmp/gotw_measure.json"), "w")
+                    .write(json.dumps(_MEASURE)))
+
+
+def _gw_top(hit_list, threshold, label=None):
     if not hit_list:
         return None
     top = max(hit_list, key=lambda h: h.get("score", 0))
     if top.get("score", 0) < threshold:
         return None
+    if not _has_geom(top):
+        polys = [h for h in hit_list if _has_geom(h)]
+        best_poly = max(polys, key=lambda h: h.get("score", 0)) if polys else None
+        if _MEASURE_ON:
+            _MEASURE.append({"label": label, "top_id": top.get("place_id"), "top_title": top.get("title"),
+                             "top_score": top.get("score"), "top_poly": False,
+                             "poly_id": best_poly.get("place_id") if best_poly else None,
+                             "poly_title": best_poly.get("title") if best_poly else None,
+                             "poly_score": best_poly.get("score") if best_poly else None,
+                             "gap": round(top.get("score", 0) - best_poly.get("score", 0), 3) if best_poly else None})
+        if best_poly and top.get("score", 0) - best_poly.get("score", 0) <= GEOM_MARGIN:
+            top = best_poly                       # prefer the (near-tied) polygon
+    elif _MEASURE_ON:
+        _MEASURE.append({"label": label, "top_id": top.get("place_id"), "top_title": top.get("title"),
+                         "top_score": top.get("score"), "top_poly": True})
     pt = None
     geos = top.get("geometries") or []
     if geos and geos[0].get("repr_point"):
@@ -240,7 +268,7 @@ def run_pass_gateway(rows, pass_cfg, radius_km, threshold, concurrency, parents_
             pid, resp = fut.result()
             if not resp or "_error" in resp:
                 continue
-            cand = _gw_top(resp.get("hits") or [], threshold)
+            cand = _gw_top(resp.get("hits") or [], threshold, pass_cfg[0])
             if cand:
                 best[pid] = cand
     return best

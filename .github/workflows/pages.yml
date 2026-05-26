@@ -38,6 +38,7 @@ jobs:
           gh release download site-assets --repo "$GITHUB_REPOSITORY" --dir /tmp/assets --clobber
           tar -xf /tmp/assets/reader.tar -C docs/                       # -> docs/reader/
           [ -f /tmp/assets/plates.tar ] && tar -xf /tmp/assets/plates.tar -C docs/   # -> docs/plates/
+          [ -f /tmp/assets/geometry.pmtiles ] && cp /tmp/assets/geometry.pmtiles docs/   # -> docs/geometry.pmtiles
           cp /tmp/assets/gotw-fts.sqlite.png docs/search/
           cp /tmp/assets/symphonym.int8.onnx /tmp/assets/symphonym-embeddings.i8 \
              /tmp/assets/symphonym-meta.json /tmp/assets/symphonym-manifest.json docs/search/

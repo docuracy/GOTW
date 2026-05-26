@@ -21,7 +21,10 @@ _CONCEPTS = json.loads(Path("data/aat_shortlist.json").read_text())["concepts"]
 AAT_LABEL = {c["aat_id"]: c["label"] for c in _CONCEPTS}
 AAT_FCLASS = {c["aat_id"]: c["fclass"] for c in _CONCEPTS}
 _VOL = re.compile(r"v(\w+?)(?:-ocr)?\.txt$|-v(\w+?)[-.]", re.I)
-LIGHT_KEYS = ("id", "name", "fclass")   # the only attributes baked into the vector tiles
+# Match-certainty rank from the reconcile pass (1 = most certain), baked into the tiles so the map can
+# filter by certainty. Cumulative: a "show <= N" filter includes everything more certain. 5 = no pass.
+CERT_RANK = {"1-exact-in": 1, "2-phon-in": 2, "3-phon-broad": 3, "4-phon-cc": 4, "5-coords": 4}
+LIGHT_KEYS = ("id", "name", "fclass", "cert")   # the only attributes baked into the vector tiles
 # Per-volume HathiTrust ids (the University of Minnesota scans we OCR'd) -> exact source-page deep links.
 HTIDS = {"1": "umn.31951001678068j", "2": "umn.31951001678069h", "3": "umn.31951001678070w",
          "4": "umn.31951001678071u", "5": "umn.31951001678072s", "6": "umn.31951001678073q",
@@ -63,6 +66,7 @@ def hathi_url(vol, page):
 def props_of(r):
     """Full popup property dict for a place row (drops empties)."""
     ext = json.loads(r["extraction"]) if r["extraction"] else {}
+    recon = json.loads(r["reconciliation"]) if r["reconciliation"] else {}
     vol = volume_of(r["src_file"])
     p = {
         "id": r["pid"],
@@ -81,6 +85,9 @@ def props_of(r):
         "page": r["page_start"],
         "headword": r["headword_disp"],
         "whg_id": r["whg_match_id"],
+        "whg_name": (recon.get("candidate") or {}).get("name"),   # the WHG match's primary toponym
+        "whg_pass": recon.get("pass"),                            # reconcile pass that matched (exact/phonetic/…)
+        "cert": CERT_RANK.get(recon.get("pass"), 5),              # certainty rank (1=best) for the map filter
         "whg_score": r["whg_score"],
         "src": hathi_url(vol, r["page_start"]),
     }
@@ -123,7 +130,7 @@ def main():
 
     rows = con.execute(
         "SELECT p.rowid AS pid, p.entry_id AS eid, p.name, p.aat_type_id, p.lat, p.lon, p.whg_match_id, "
-        "       p.whg_score, p.extraction, e.page_start, e.headword_disp, s.filename AS src_file "
+        "       p.whg_score, p.reconciliation, p.extraction, e.page_start, e.headword_disp, s.filename AS src_file "
         "FROM place p LEFT JOIN entry e ON e.entry_id = p.entry_id "
         "LEFT JOIN source s ON s.source_id = e.source_id "
         "WHERE p.lat IS NOT NULL AND p.lon IS NOT NULL ORDER BY p.name").fetchall()

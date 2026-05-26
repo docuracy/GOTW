@@ -89,6 +89,18 @@
     #lightbox.dragging img { cursor:grabbing; }
     #lightbox .lb-close { position:absolute; top:8px; right:16px; z-index:2; background:none; border:none;
                           color:#ddd; font-size:1.7rem; line-height:1; cursor:pointer; }
+    #lightbox .lb-rot { position:absolute; top:10px; right:52px; z-index:2; background:none; border:none;
+                        color:#ddd; font-size:1.5rem; line-height:1; cursor:pointer; }
+    #lightbox .lb-report { position:absolute; top:12px; left:16px; z-index:2; background:rgba(255,255,255,.12);
+                           color:#eee; border:1px solid #888; border-radius:5px; padding:4px 9px;
+                           font:12px system-ui,sans-serif; cursor:pointer; }
+    #lightbox .lb-report:hover:not(:disabled) { background:rgba(255,255,255,.22); }
+    #lightbox .lb-report:disabled { opacity:.4; cursor:default; }
+    #lightbox .lb-reports { position:absolute; top:48px; left:16px; z-index:2; max-width:340px;
+                            color:#eee; font:12px system-ui,sans-serif; text-shadow:0 1px 2px #000; }
+    #lightbox .lb-reports b { display:block; color:#f0b48a; margin-bottom:2px; font-weight:600; }
+    #lightbox .lb-reports a { color:#9cc7e0; text-decoration:none; margin-right:10px; }
+    #lightbox .lb-reports a:hover { text-decoration:underline; }
     #lightbox .lb-hint { position:absolute; bottom:10px; left:0; right:0; text-align:center; pointer-events:none;
                          color:#aaa; font:12px system-ui,sans-serif; text-shadow:0 1px 2px #000; }
     .rhw { margin:0 0 .25rem; font-size:.95rem; letter-spacing:.02em; }
@@ -138,7 +150,7 @@
 </head>
 <body>
   <div id="pane">
-    <h1>Gazetteer of the World
+    <h1>Gazetteer of the World (1856)
       <button id="info-btn" class="info-btn" title="About this project &amp; source">ⓘ</button></h1>
     <div class="search-wrap">
       <input id="q" type="search" placeholder="Search names + full text…" autocomplete="off" />
@@ -151,6 +163,14 @@
     </div>
     <div class="nav-row">
       <select id="nav-plates" title="Browse the identified plates, maps &amp; portraits"><option value="">🖼️ Plates &amp; maps…</option></select>
+    </div>
+    <div class="nav-row">
+      <select id="nav-cert" title="Show map locations whose WHG match is at least this certain — cumulative (each level includes the more-certain ones). Filters the individual markers; zoom in past the heatmap.">
+        <option value="5">📍 All locations</option>
+        <option value="3">🟠 At least possible (phonetic regional)</option>
+        <option value="2">🟡 At least probable (phonetic in region)</option>
+        <option value="1">🟢 Certain only (exact + containment)</option>
+      </select>
     </div>
   </div>
   <div class="wrap"><div id="map"></div>
@@ -252,21 +272,23 @@
 
   // Surface existing reports in popups: fetch the repo's `explorer-report` issues ONCE (cached ~5 min, to
   // respect GitHub's 60/hr unauthenticated limit) and index by the eid in each issue's deep link / meta.
-  let _reps = null, _repsAt = 0;
+  let _reps = null, _repsAt = 0, _platereps = null;
   async function reportsByEid() {
     if (_reps && Date.now() - _repsAt < 300000) return _reps;
     try {
       const r = await fetch("https://api.github.com/repos/WorldHistoricalGazetteer/gazetteer-of-the-world/issues?labels=explorer-report&state=all&per_page=100",
                             { headers: { Accept: "application/vnd.github+json" } });
       if (!r.ok) throw 0;
-      const map = {};
+      const map = {}, pmap = {};
       for (const it of await r.json()) {
         if (it.pull_request) continue;
         const m = (it.body || "").match(/[?&]entry=(\d+)/) || (it.body || "").match(/"eid"\s*:\s*(\d+)/);
         if (m) (map[+m[1]] = map[+m[1]] || []).push({ number: it.number, title: it.title, state: it.state, url: it.html_url });
+        const pm = (it.title + " " + (it.body || "")).match(/v[0-9]+\/p[0-9]+\.jpg/);   // plate-orientation reports keyed by plate path
+        if (pm) (pmap[pm[0]] = pmap[pm[0]] || []).push({ number: it.number, title: it.title, state: it.state, url: it.html_url });
       }
-      _reps = map; _repsAt = Date.now();
-    } catch { _reps = _reps || {}; }   // rate-limited/offline -> just show no reports
+      _reps = map; _platereps = pmap; _repsAt = Date.now();
+    } catch { _reps = _reps || {}; _platereps = _platereps || {}; }   // rate-limited/offline -> just show no reports
     return _reps;
   }
   function reportsHTML(reps) {
@@ -277,6 +299,9 @@
   }
   const repsFor = eid => (_reps && _reps[eid]) || null;   // synchronous cache lookup (reader badges)
 
+  // reconcile.py's pass label -> a human-readable match mode shown in the popup
+  const MATCH_MODE = { "1-exact-in": "exact name + containment", "2-phon-in": "phonetic + containment",
+    "3-phon-broad": "phonetic (broad)", "4-phon-cc": "phonetic + country", "5-coords": "coordinates" };
   function popupHTML(p) {
     // MapLibre serialises array/object properties to JSON strings — parse notes back.
     let notes = p.notes;
@@ -290,7 +315,7 @@
     if (notes.length) h += `<dt>Notes</dt><dd><ul>${notes.map(n=>`<li>${esc(n)}</li>`).join("")}</ul></dd>`;
     h += `</dl><p class="src">Source: Vol.&nbsp;${p.vol ?? "?"}, p.&nbsp;${p.page ?? "—"}` +
          (p.headword && p.headword !== p.name ? ` (under <em>${esc(p.headword)}</em>)` : "") +
-         `<br>WHG match: ${whgLink(p.whg_id)}${p.whg_score!=null?` · score ${p.whg_score}`:""}</p>`;
+         `<br>WHG match: ${p.whg_name?`<em>${esc(p.whg_name)}</em> `:""}${whgLink(p.whg_id)}${p.whg_score!=null?` · score ${p.whg_score}`:""}${p.whg_pass?` · via ${MATCH_MODE[p.whg_pass]||esc(p.whg_pass)}`:""}</p>`;
     h += `<div class="pop-actions">`;
     if (p.vol) h += `<button class="read-btn" data-vol="${esc(String(p.vol))}" data-page="${esc(String(p.page ?? ""))}"`
                   + ` data-hw="${esc(p.headword || p.name || "")}"${p.eid != null ? ` data-eid="${p.eid}"` : ""}`
@@ -306,6 +331,10 @@
   // full popup record is fetched lazily from a sharded detail store on click. Built by
   // process/build_tiles.sh, served statically (GitHub Pages handles the byte-range requests PMTiles needs).
   const SRC = { url: "./places.pmtiles", layer: "places", detail: "./detail" };
+  // WHG actual line/polygon geometries for reconciled places that hold them (~3.2k: admin areas, water
+  // bodies, coasts) — a showcase of WHG's geometry holdings. Extracted from the /vast geom-store and tiled
+  // by the orchestrator (process/export_geometries.py + build_tiles.sh). Keyed by whg_id for highlighting.
+  const GEOM = { url: "./geometry.pmtiles", layer: "geometry" };
 
   // Circles fade IN as the heatmap fades OUT (cross-fade across z5–7).
   // A place with a population is POP_MIN…POP_MAX × the default radius (by normalised latest-year pop `pn`,
@@ -313,6 +342,10 @@
   // the population factor multiplies inside each stop.
   const POP_MIN = 1.3, POP_MAX = 10;
   const popFactor = ["case", ["has", "pn"], ["+", POP_MIN, ["*", POP_MAX - POP_MIN, ["get", "pn"]]], 1];
+  // Match-certainty filter: show individual markers whose cert rank <= CERT_LEVEL (cumulative). cert is baked
+  // into the tiles by export_geojson.py (1=exact+containment … 4=phonetic+country, 5=none); 5 = show all.
+  let CERT_LEVEL = 5;
+  const ptsFilter = () => ["all", ["!", ["has", "point_count"]], ["<=", ["coalesce", ["get", "cert"], 5], CERT_LEVEL]];
   const PAINT = {
     "circle-radius": ["interpolate", ["linear"], ["zoom"],
       6, ["*", 2.5, popFactor],
@@ -337,6 +370,18 @@
       0,"rgba(255,255,178,0)", .08,"rgba(255,237,160,.7)", .3,"#fed976", .5,"#feb24c",
       .65,"#fd8d3c", .8,"#fc4e2a", .9,"#e31a1c", 1,"#bd0026"]
   };
+
+  // WHG geometry layers. Faint base is a DASHED OUTLINE only (no fill — fills stack too densely where admin areas overlap),
+  // clean point/heatmap view when zoomed out and reveals real boundaries as you zoom. The SELECTED place's
+  // geometry is redrawn BOLD (solid line + light fill) in the pin's orange (set on popup open, cleared on close).
+  const GEOM_MINZOOM = 5;
+  const NO_GEOM = ["==", ["get", "whg_id"], " "];   // matches nothing -> highlight hidden until a place is selected
+  const GEOM_LINE = { "line-color": "#0369a1", "line-dasharray": [2.5, 2],
+    "line-opacity": ["interpolate",["linear"],["zoom"], 5,0, 6,.55],
+    "line-width": ["interpolate",["linear"],["zoom"], 6,.5, 10,1.4] };
+  const GEOM_HL_FILL = { "fill-color": "#c2410c", "fill-opacity": .12 };
+  const GEOM_HL_LINE = { "line-color": "#c2410c", "line-opacity": 1,
+    "line-width": ["interpolate",["linear"],["zoom"], 5,1.5, 10,3] };
 
   // Popup detail is fetched lazily by place id from sharded JSON; shards (and whole-shard fetches) are
   // cached, so clicking neighbouring places reuses one request. The manifest gives the shard count.
@@ -370,12 +415,13 @@
     if (placeMarker) placeMarker.remove();
     placeMarker = new maplibregl.Marker({ color: "#c2410c" }).setLngLat(lngLat).addTo(map);
     const popup = placePopup = new maplibregl.Popup({ maxWidth: "320px" }).setLngLat(lngLat).addTo(map);
-    popup.on("close", () => { if (placeMarker) { placeMarker.remove(); placeMarker = null; } });
+    popup.on("close", () => { if (placeMarker) { placeMarker.remove(); placeMarker = null; } setGeomHighlight(null); });
     popup.setHTML(`<div class="pop"><h3>${esc(name || "")}</h3><p class="meta">loading…</p></div>`);
     let detail;
     try { detail = await getDetail(id); }
     catch { if (popup === placePopup) popup.setHTML(`<div class="pop"><h3>${esc(name || "")}</h3><p class="meta">detail unavailable</p></div>`); return; }
     if (popup !== placePopup) return;
+    setGeomHighlight(detail.whg_id || null);   // bold-outline this place's WHG geometry if it has one
     popup.setHTML(popupHTML(detail));
     try {   // surface any existing error-reports for this entry (cached lookup, no per-popup request)
       const reps = (await reportsByEid())[detail.eid];
@@ -384,12 +430,30 @@
     } catch {}
   }
 
+  // Faint base geometry (added under the place layers so points/markers stay on top). The line layer carries
+  // no geometry-type filter: it draws polygon outlines AND the standalone LineStrings (coasts, straits).
+  function addGeomLayers() {
+    map.addLayer({ id: "geom-line", type: "line", source: "geom", "source-layer": GEOM.layer,
+      minzoom: GEOM_MINZOOM, paint: GEOM_LINE });
+  }
+  // Selected-place highlight (added ON TOP of the place layers). Filtered to nothing until a place is chosen.
+  function addGeomHighlight() {
+    map.addLayer({ id: "geom-hl-fill", type: "fill", source: "geom", "source-layer": GEOM.layer,
+      filter: NO_GEOM, paint: GEOM_HL_FILL });
+    map.addLayer({ id: "geom-hl", type: "line", source: "geom", "source-layer": GEOM.layer,
+      filter: NO_GEOM, paint: GEOM_HL_LINE });
+  }
+  function setGeomHighlight(whgId) {   // bold-outline the selected place's WHG geometry, if it has one
+    const f = whgId ? ["==", ["get", "whg_id"], whgId] : NO_GEOM;
+    for (const id of ["geom-hl-fill", "geom-hl"]) if (map.getLayer(id)) map.setFilter(id, f);
+  }
+
   function addLayers() {
     map.addLayer({ id: "heat", type: "heatmap", source: "places", "source-layer": SRC.layer, maxzoom: 8, paint: HEAT });
     // Circles only for INDIVIDUAL places (cluster leaders carry point_count and feed only the heatmap),
     // so a click always resolves to one real place; dense areas stay heatmap until you zoom in enough.
     map.addLayer({ id: "pts", type: "circle", source: "places", "source-layer": SRC.layer,
-      minzoom: 6, filter: ["!", ["has", "point_count"]], paint: PAINT });
+      minzoom: 6, filter: ptsFilter(), paint: PAINT });
     map.on("click", "pts", e => {
       const p = e.features[0].properties;
       const at = e.features[0].geometry?.coordinates?.slice ? e.features[0].geometry.coordinates : e.lngLat;
@@ -551,14 +615,42 @@
     else if (row) openReader(row.vol, row.page, row.headword, eid, row.rc);
   }
   // Zoomable full-screen plate viewer: scroll to zoom (about the cursor), drag to pan, double-click to reset.
-  const LB = { s: 1, tx: 0, ty: 0, nw: 0, nh: 0, drag: null };
+  const LB = { s: 1, tx: 0, ty: 0, nw: 0, nh: 0, rot: 0, drag: null, src: null };
   const lbImg = () => document.getElementById("lightbox").querySelector("img");
-  function lbApply() { lbImg().style.transform = `translate(${LB.tx}px,${LB.ty}px) scale(${LB.s})`; }
-  function lbFit() {                        // scale the image to fit the viewport, centred
-    const vw = innerWidth, vh = innerHeight;
-    LB.s = Math.min(vw / LB.nw, vh / LB.nh, 1) * 0.96 || 1;
-    LB.tx = (vw - LB.nw * LB.s) / 2; LB.ty = (vh - LB.nh * LB.s) / 2; lbApply();
+  function lbApply() { lbImg().style.transform = `translate(${LB.tx}px,${LB.ty}px) scale(${LB.s}) rotate(${LB.rot}deg)`; }
+  function lbDims() {                       // rotated bounding box + its min corner (transform-origin 0 0)
+    const w = LB.nw, h = LB.nh, r = ((LB.rot % 360) + 360) % 360;
+    if (r === 90)  return { dw: h, dh: w, minx: -h, miny: 0 };
+    if (r === 180) return { dw: w, dh: h, minx: -w, miny: -h };
+    if (r === 270) return { dw: h, dh: w, minx: 0,  miny: -w };
+    return { dw: w, dh: h, minx: 0, miny: 0 };
   }
+  function lbFit() {                        // scale the (possibly rotated) image to fit the viewport, centred
+    const vw = innerWidth, vh = innerHeight, d = lbDims();
+    LB.s = Math.min(vw / d.dw, vh / d.dh, 1) * 0.96 || 1;
+    LB.tx = (vw - d.dw * LB.s) / 2 - LB.s * d.minx;
+    LB.ty = (vh - d.dh * LB.s) / 2 - LB.s * d.miny;
+    lbApply();
+  }
+  function reportOrientation() {            // open a prefilled GitHub issue with the rotation the user applied
+    const src = LB.src || "", deg = ((LB.rot % 360) + 360) % 360;
+    const rel = src.split("/").slice(-2).join("/") || src;   // e.g. v2/p00140.jpg
+    const qs = new URLSearchParams({
+      labels: "explorer-report",              // so the report enters the agent issue-handling workflow
+      title: `[plate orientation] ${rel}${deg ? ` — rotate ${deg}\u00b0 CW` : " — already correct"}`,
+      body: [`**Plate:** \`${src}\``, ``,
+        deg ? `This plate needs rotating **${deg}\u00b0 clockwise** to be upright (the auto-orientation pass got it wrong).`
+            : `This plate appears to be **already correctly oriented**.`,
+        ``, `_Reported from the explorer lightbox._`].join("\n"),
+    });
+    window.open(`https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world/issues/new?${qs.toString()}`,
+      "_blank", "noopener");
+  }
+  function lbSyncReport() {                  // the orientation report is meaningful only once rotated from original
+    const b = document.querySelector("#lightbox .lb-report");
+    if (b) b.disabled = (((LB.rot % 360) + 360) % 360) === 0;
+  }
+  function lbRotate() { LB.rot = (LB.rot + 90) % 360; lbFit(); lbSyncReport(); }
   function lbWire(lb) {
     lb.addEventListener("wheel", e => {     // zoom about the cursor (keep the point under it fixed)
       e.preventDefault();
@@ -574,22 +666,45 @@
     window.addEventListener("mouseup", () => { LB.drag = null; lb.classList.remove("dragging"); });
     lb.querySelector("img").addEventListener("dblclick", e => { e.preventDefault(); lbFit(); });
     lb.querySelector(".lb-close").addEventListener("click", () => lb.classList.remove("on"));
+    lb.querySelector(".lb-rot").addEventListener("click", lbRotate);
+    lb.querySelector(".lb-report").addEventListener("click", reportOrientation);
     lb.addEventListener("mousedown", e => { if (e.target === lb) lb.classList.remove("on"); });   // backdrop closes
+  }
+  async function renderPlateReports(src) {     // surface existing orientation reports for this plate
+    const lb = document.getElementById("lightbox"), box = lb && lb.querySelector(".lb-reports");
+    if (!box) return;
+    box.innerHTML = "";
+    await reportsByEid();                        // also fills _platereps (keyed by plate path)
+    const rel = (src || "").split("/").slice(-2).join("/");
+    const reps = _platereps && _platereps[rel];
+    if (!reps || !reps.length || LB.src !== src) return;   // bail if the user already moved to another plate
+    const open = reps.filter(r => r.state === "open").length;
+    box.innerHTML = `<b>\u2691 ${reps.length} orientation report${reps.length > 1 ? "s" : ""}${open ? ` \u00b7 ${open} open` : ""}</b>`
+      + reps.slice(0, 5).map(r => `<a href="${r.url}" target="_blank" rel="noopener">#${r.number}${r.state === "closed" ? " \u2713" : ""}</a>`).join("");
   }
   function showLightbox(src) {
     let lb = document.getElementById("lightbox");
     if (!lb) {
       lb = document.createElement("div"); lb.id = "lightbox";
-      lb.innerHTML = '<button class="lb-close" title="Close (Esc)">✕</button><img>'
-        + '<div class="lb-hint">scroll to zoom · drag to pan · double-click to reset · Esc to close</div>';
+      lb.innerHTML = '<button class="lb-close" title="Close (Esc)">✕</button>'
+        + '<button class="lb-rot" title="Rotate 90° (R)">↻</button>'
+        + '<button class="lb-report" disabled title="Rotate the plate to its correct orientation first, then report it (opens a GitHub issue with the rotation applied)">⚑ orientation</button>'
+        + '<div class="lb-reports"></div>'
+        + '<img alt="plate">'
+        + '<div class="lb-hint">scroll to zoom · drag to pan · ↻ rotate · double-click to reset · Esc to close</div>';
       document.body.appendChild(lb); lbWire(lb);
     }
     const img = lb.querySelector("img");
+    LB.rot = 0; LB.src = src;                 // each plate opens unrotated; track src for the orientation report
+    lbSyncReport(); renderPlateReports(src);
     img.onload = () => { LB.nw = img.naturalWidth || 1; LB.nh = img.naturalHeight || 1; lbFit(); };
     img.src = src; lb.classList.add("on");
   }
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape") { const lb = document.getElementById("lightbox"); if (lb) lb.classList.remove("on"); }
+    const lb = document.getElementById("lightbox");
+    if (!lb || !lb.classList.contains("on")) return;
+    if (e.key === "Escape") lb.classList.remove("on");
+    else if (e.key === "r" || e.key === "R") lbRotate();
   });
   document.addEventListener("click", e => {
     const pimg = e.target.closest(".rplate img");             // click a plate -> zoomable full-screen viewer
@@ -619,7 +734,12 @@
     const pm = new pmtiles.PMTiles(SRC.url);
     protocol.add(pm);
     map.addSource("places", { type: "vector", url: "pmtiles://" + SRC.url });
-    addLayers();
+    const gpm = new pmtiles.PMTiles(GEOM.url);   // WHG line/polygon geometries (separate tileset)
+    protocol.add(gpm);
+    map.addSource("geom", { type: "vector", url: "pmtiles://" + GEOM.url });
+    addGeomLayers();        // faint base, UNDER the places
+    addLayers();            // heat + circles
+    addGeomHighlight();     // selected-place outline, ON TOP
     const h = await pm.getHeader();          // tile bounds -> fit
     map.fitBounds([[h.minLon, h.minLat], [h.maxLon, h.maxLat]], { padding: 60, maxZoom: 6 });
     let count = null;
@@ -801,14 +921,13 @@
         o.textContent = (v.title.split("—").pop() || v.vol).trim(); vs.appendChild(o); });
     }).catch(() => {});
 
-    const KIND = { map:"🗺️ Map", city_view:"🏙️ View", landscape:"🏞️ Landscape" };
     fetch("./plates/manifest.json").then(r => r.ok ? r.json() : {}).then(m => {   // fill the plates browser
       const ps = $("nav-plates");
       Object.keys(m).sort().forEach(v => {
         const arr = m[v]; if (!arr || !arr.length) return;
         const og = document.createElement("optgroup"); og.label = "Vol. " + v.replace(/^v/, "");
         arr.forEach(pl => { const o = document.createElement("option"); o.value = pl.img;
-          o.textContent = `${KIND[pl.kind] || "🖼️ Plate"}${pl.after_page != null ? " — after p." + pl.after_page : ""}`;
+          o.textContent = `${({map:"🗺️",city_view:"🏙️",landscape:"🏞️"}[pl.kind]||"🖼️")} ${pl.title || ({map:"Map",city_view:"View",landscape:"Landscape"}[pl.kind]||"Plate")}${pl.after_page != null ? " — after p." + pl.after_page : ""}`;
           og.appendChild(o); });
         ps.appendChild(og);
       });
@@ -820,6 +939,8 @@
       jumpToLetter(L); e.target.selectedIndex = 0; });
     $("nav-plates").addEventListener("change", e => { const img = e.target.value; if (!img) return;
       showLightbox(img); e.target.selectedIndex = 0; });
+    $("nav-cert").addEventListener("change", e => { CERT_LEVEL = +e.target.value || 5;
+      if (map.getLayer("pts")) map.setFilter("pts", ptsFilter()); });
   })();
   </script>
 </body>

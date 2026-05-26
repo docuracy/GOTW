@@ -16,6 +16,9 @@ cd "$(dirname "$0")/.."
 DB="${DB:-${1:-data/gotw_seg.sqlite}}"
 GEOJSONL="${GEOJSONL:-/tmp/gotw_places.geojsonl}"
 OUT="${OUT:-docs/places.pmtiles}"
+GEOM_STORE="${GEOM_STORE:-/vast/ishi/geom}"          # consolidated WHG geom-store (CRC /vast)
+GEOM_GEOJSONL="${GEOM_GEOJSONL:-/tmp/gotw_geometry.geojsonl}"
+GEOM_OUT="${GEOM_OUT:-docs/geometry.pmtiles}"
 
 command -v tippecanoe >/dev/null || { echo "ERROR: tippecanoe not on PATH — see header." >&2; exit 1; }
 
@@ -36,3 +39,22 @@ tippecanoe -o "$OUT" -f -l places \
 
 echo "done -> $OUT"
 echo "(set map.html SRC to { mode:\"pmtiles\", url:\"./places.pmtiles\", layer:\"places\" } to use it)"
+
+# ── WHG line/polygon geometries (showcase) — only on the CRC, where the /vast geom-store lives ──────────
+# Reconciled matches that resolve to OSM/OHM relations, Wikidata/TGN areas, etc. carry real boundaries.
+# export_geometries.py reads them from the geom-store (NOT ES _source) and writes non-point GeoJSON;
+# tippecanoe tiles them into a 'geometry' layer. Off-CRC the store is absent → empty export → skip.
+echo
+echo "geometry  export $DB + $GEOM_STORE -> $GEOM_GEOJSONL"
+python3 process/export_geometries.py --db "$DB" --store "$GEOM_STORE" --out "$GEOM_GEOJSONL"
+if [ -s "$GEOM_GEOJSONL" ]; then
+  echo "geometry  tippecanoe -> $GEOM_OUT"
+  # -Z3 -z10: large admin polygons visible from z3; map.html gates the FAINT layer above z5. lines = polygon
+  # outlines + standalone coasts/straits. --no-tile-size-limit: keep all ~3k features (never drop to fit 500KB).
+  tippecanoe -o "$GEOM_OUT" -f -l geometry \
+    -Z3 -z10 --simplification=10 --no-tiny-polygon-reduction --no-tile-size-limit \
+    "$GEOM_GEOJSONL"
+  echo "done -> $GEOM_OUT"
+else
+  echo "geometry  no geom-store / no features (off-CRC) — skipping $GEOM_OUT"
+fi

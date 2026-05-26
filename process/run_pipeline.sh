@@ -202,8 +202,8 @@ stage_reconcile(){      # hierarchy-aware containment cascade (htc, gateway)
   wait_job htc "$jid" "reconcile $jid" || die "reconcile failed"
 }
 
-stage_export(){         # geojson+pmtiles+detail+geocoded, reader, FTS, (phonetic)
-  log "STAGE export — pmtiles + detail + reader + search indexes"
+stage_export(){         # places+geometry pmtiles, detail+geocoded, reader, FTS, (phonetic)
+  log "STAGE export — places+geometry pmtiles + detail + reader + search indexes"
   local c="process/build_tiles.sh"$'\n'
   c+="python3 process/export_reader.py --db $DB --out-dir docs/reader --plates-manifest docs/plates/manifest.json"$'\n'
   c+="python3 process/build_search_db.py --db $DB --out docs/search/gotw-fts.sqlite.png"$'\n'

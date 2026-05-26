@@ -39,3 +39,6 @@ docs/plates/
 txt/
 .claude/
 data/*.sqlite
+
+# served from the site-assets release (42MB), not git — see process/publish_assets.sh
+docs/geometry.pmtiles
