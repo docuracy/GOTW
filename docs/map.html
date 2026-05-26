@@ -15,13 +15,29 @@
     :root { --ink:#1a2438; --paper:#f4f1ea; --line:#d8d2c4; }
     * { box-sizing:border-box; }
     html,body { margin:0; height:100%; font-family:Georgia,"Times New Roman",serif; color:var(--ink); }
-    header { padding:.7rem 1.1rem; background:var(--paper); border-bottom:1px solid var(--line);
-             display:flex; align-items:baseline; gap:.9rem; flex-wrap:wrap; }
-    header h1 { font-size:1.05rem; margin:0; }
-    header .sub { font-size:.8rem; color:#6b6452; font-style:italic; }
-    header a { color:#2a6f97; font-size:.8rem; margin-left:auto; }
     #map { position:absolute; top:0; left:0; right:0; bottom:0; }
-    .wrap { position:absolute; top:48px; left:0; right:0; bottom:0; }
+    .wrap { position:absolute; top:0; left:0; right:0; bottom:0; }
+    /* top-left control pane (replaces the wide header) */
+    #pane { position:absolute; top:12px; left:12px; z-index:950; width:min(320px,92vw);
+            background:rgba(244,241,234,.96); border:1px solid var(--line); border-radius:8px;
+            box-shadow:0 2px 14px rgba(0,0,0,.2); padding:.55rem .65rem; font-family:system-ui,sans-serif; }
+    #pane h1 { font-family:Georgia,serif; font-size:1rem; margin:0 0 .45rem; display:flex; align-items:center; gap:.4rem; }
+    #pane .info-btn { margin-left:auto; cursor:pointer; border:1px solid var(--line); background:#fff; color:#2a6f97;
+                      border-radius:50%; width:1.45rem; height:1.45rem; font-size:.9rem; line-height:1; padding:0; }
+    #pane .info-btn:hover { background:#eaf2f7; }
+    #pane .search-wrap { position:relative; }
+    #pane #q { width:100%; font-family:Georgia,serif; font-size:.85rem; padding:.34rem .55rem;
+               border:1px solid var(--line); border-radius:4px; }
+    #pane .phon-tog { font-size:.74rem; color:#6b6452; display:flex; align-items:center; gap:.25rem; cursor:pointer;
+                      margin:.35rem 0 .1rem; white-space:nowrap; }
+    #pane .nav-row { display:flex; gap:.4rem; margin-top:.4rem; }
+    #pane select { font-family:system-ui,sans-serif; font-size:.76rem; flex:1 1 0; min-width:0; padding:.28rem .3rem;
+                   border:1px solid var(--line); border-radius:4px; background:#fff; color:var(--ink); cursor:pointer; }
+    /* info modal body */
+    .info-box { height:auto; max-height:88vh; }
+    .info-body { font-family:Georgia,serif; font-size:.9rem; line-height:1.55; }
+    .info-body h3 { font-size:.95rem; margin:1rem 0 .2rem; color:#6b6452; }
+    .info-body p { margin:.5rem 0; } .info-body a { color:#2a6f97; }
     .legend { position:absolute; bottom:18px; left:12px; background:rgba(244,241,234,.94);
               border:1px solid var(--line); border-radius:6px; padding:.5rem .7rem; font-size:.74rem;
               font-family:system-ui,sans-serif; line-height:1.7; box-shadow:0 1px 6px rgba(0,0,0,.12); }
@@ -85,12 +101,9 @@
     .rmiss { background:#fff3cd; border:1px solid #ffe69c; color:#7a5b00; padding:.4rem .7rem; margin:.3rem 0;
              border-radius:4px; font-family:system-ui,sans-serif; font-size:.78rem; }
     /* search */
-    header #q { font-family:Georgia,serif; font-size:.85rem; padding:.32rem .55rem; border:1px solid var(--line);
-                border-radius:4px; min-width:230px; flex:0 1 320px; }
-    header .phon-tog { font-size:.75rem; color:#6b6452; display:flex; align-items:center; gap:.25rem; cursor:pointer; white-space:nowrap; }
-    #results { position:absolute; top:46px; left:1.1rem; width:min(460px,92vw); max-height:72vh; overflow-y:auto;
+    #results { position:absolute; top:calc(100% + 4px); left:0; width:min(460px,86vw); max-height:68vh; overflow-y:auto;
                background:#fff; border:1px solid var(--line); border-radius:6px; box-shadow:0 6px 24px rgba(0,0,0,.28);
-               z-index:900; font-family:system-ui,sans-serif; }
+               z-index:960; font-family:system-ui,sans-serif; }
     #results[hidden] { display:none; }
     .rs-status { padding:.6rem .8rem; color:#6b6452; font-size:.82rem; }
     .rs-sec { padding:.35rem .8rem; font-size:.66rem; text-transform:uppercase; letter-spacing:.05em; color:#857d6c;
@@ -119,14 +132,22 @@
   </style>
 </head>
 <body>
-  <header>
-    <h1>A Gazetteer of the World — extracted places</h1>
-    <span class="sub">LLM-extracted (self-hosted Llama-3.3-70B) · geolocated against the World Historical Gazetteer (3-pass reconciliation)</span>
-    <input id="q" type="search" placeholder="Search names + full text…" autocomplete="off" />
-    <label class="phon-tog" title="Phonetic / cross-script name matching (Symphonym) — loads a model on first use"><input type="checkbox" id="phon" /> phonetic</label>
-    <a href="./">← about this project</a>
-  </header>
-  <div id="results" hidden></div>
+  <div id="pane">
+    <h1>Gazetteer of the World
+      <button id="info-btn" class="info-btn" title="About this project &amp; source">ⓘ</button></h1>
+    <div class="search-wrap">
+      <input id="q" type="search" placeholder="Search names + full text…" autocomplete="off" />
+      <div id="results" hidden></div>
+    </div>
+    <label class="phon-tog" title="Phonetic / cross-script name matching (Symphonym) — loads a model on first use"><input type="checkbox" id="phon" /> phonetic / cross-script</label>
+    <div class="nav-row">
+      <select id="nav-vol" title="Open the reader at a volume"><option value="">📖 Read volume…</option></select>
+      <select id="nav-letter" title="Jump to a letter within the chosen volume"><option value="">A–Z…</option></select>
+    </div>
+    <div class="nav-row">
+      <select id="nav-plates" title="Browse the identified plates, maps &amp; portraits"><option value="">🖼️ Plates &amp; maps…</option></select>
+    </div>
+  </div>
   <div class="wrap"><div id="map"></div>
     <div class="legend" id="legend"><b>Feature type</b></div>
   </div>
@@ -138,6 +159,34 @@
         <div id="sentinel-top"></div>
         <div id="reader-content"></div>
         <div id="sentinel-bottom"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="info-modal" hidden>
+    <div class="modal-box info-box">
+      <div class="modal-head"><span>About this demonstrator</span><button id="info-close" title="Close (Esc)">✕</button></div>
+      <div class="reader info-body">
+        <p><b>A Gazetteer of the World</b> (Royal Geographical Society, 1856; 7 volumes, public domain) turned
+        into structured, typed, geolocated linked data — and explored here with <b>no application server</b>
+        (a static GitHub Pages site: vector-tile map, whole-corpus reader, in-browser search).</p>
+        <h3>Source &amp; OCR</h3>
+        <p>Built from the public-domain HathiTrust page scans. No inherited OCR (licence + quality): the pages
+        were re-OCR'd with the layout-aware <b>Surya</b> model on the Pitt CRC GPU cluster, with two-column
+        reading order reconstructed from line geometry.</p>
+        <h3>How it was made</h3>
+        <p>Every record is typed by a <b>self-hosted Llama-3.3-70B</b> (closed Getty-AAT enum); tables and plates
+        are digitised by <b>Qwen2.5-VL</b>; each place is reconciled to the
+        <a href="https://whgazetteer.org" target="_blank" rel="noopener">World Historical Gazetteer</a> by a
+        containment-aware cascade (resolve the admin parents to polygons, then match <i>inside</i> the parent
+        region). All LLM/VLM stages are self-hosted — no per-token cost.
+        <b>116,292 places · 84.8% reconciled · 1,774 tables · 133 plates.</b></p>
+        <h3>Origin &amp; credits</h3>
+        <p>The project arose from Humphrey Southall's offer of his transcripts to Ruth Mostern and the resulting
+        discussion; it uses its own public-domain OCR rather than those transcripts. Source code &amp; method:
+        <a href="https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world" target="_blank" rel="noopener">github.com/WorldHistoricalGazetteer/gazetteer-of-the-world</a>.</p>
+        <p style="font-size:.8rem;color:#857d6c">Spotted a data error? Use the <b>⚑ Report</b> link in any place
+        popup or reader entry.</p>
       </div>
     </div>
   </div>
@@ -665,6 +714,65 @@
       }
     });
     document.addEventListener("click", e => { if (!e.target.closest("#results") && e.target.id !== "q") $res().hidden = true; });
+  })();
+
+  // ── Top-left control pane: about modal · reader volume/letter jump · plates browser ──────────────
+  // jump the reader to the first entry of a letter within a volume (binary-search chunks by first headword)
+  async function jumpToLetter(vtag, letter) {
+    await readerIndex();
+    const vi = INDEX.findIndex(v => v.vol === vtag); if (vi < 0) return;
+    const nch = INDEX[vi].chunks;
+    const firstOf = async ci => { try { const d = await rGet(vtag, ci);
+      const e = d.find(x => x.k !== "plate" && x.hw); return e ? (alpha(e.hw)[0] || "") : ""; } catch { return ""; } };
+    let lo = 0, hi = nch - 1, c1 = nch;                     // first chunk whose first letter >= the target
+    while (lo <= hi) { const mid = (lo + hi) >> 1; const f = await firstOf(mid);
+      if (f && f >= letter) { c1 = mid; hi = mid - 1; } else lo = mid + 1; }
+    let ci;
+    if (c1 >= nch) ci = nch - 1;                            // letter past the last chunk -> last chunk
+    else { const f1 = await firstOf(c1); ci = (f1 > letter && c1 > 0) ? c1 - 1 : c1; }   // overshoot -> chunk before
+    await openReader(vtag, null, null, null, ci);
+    const hit = [...$content().querySelectorAll(".rentry")].find(a => {   // land on the first entry of the letter
+      const h = a.querySelector(".rhw"); return h && h.firstChild && alpha(h.firstChild.textContent)[0] === letter; });
+    hit && hit.scrollIntoView({ block: "start" });
+  }
+  (function wirePane() {
+    const $ = id => document.getElementById(id);
+    const infoModal = $("info-modal");
+    const closeInfo = () => { infoModal.hidden = true; document.body.style.overflow = ""; };
+    $("info-btn").addEventListener("click", () => { infoModal.hidden = false; document.body.style.overflow = "hidden"; });
+    infoModal.addEventListener("click", e => { if (e.target === infoModal || e.target.id === "info-close") closeInfo(); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && !infoModal.hidden) closeInfo(); });
+
+    const letSel = $("nav-letter");                        // A–Z options
+    for (let c = 65; c <= 90; c++) { const o = document.createElement("option"); o.value = o.textContent = String.fromCharCode(c); letSel.appendChild(o); }
+
+    let curVol = "v1";                                     // volume the letter-jump applies to
+    readerIndex().then(idx => {                            // fill the volume select from the reader index
+      const vs = $("nav-vol");
+      idx.forEach(v => { const o = document.createElement("option"); o.value = v.vol;
+        o.textContent = (v.title.split("—").pop() || v.vol).trim(); vs.appendChild(o); });
+      if (idx[0]) curVol = idx[0].vol;
+    }).catch(() => {});
+
+    const KIND = { map:"🗺️ Map", city_view:"🏙️ View", portrait:"👤 Portrait", scene:"🖼️ Scene", diagram:"📐 Diagram" };
+    fetch("./plates/manifest.json").then(r => r.ok ? r.json() : {}).then(m => {   // fill the plates browser
+      const ps = $("nav-plates");
+      Object.keys(m).sort().forEach(v => {
+        const arr = m[v]; if (!arr || !arr.length) return;
+        const og = document.createElement("optgroup"); og.label = "Vol. " + v.replace(/^v/, "");
+        arr.forEach(pl => { const o = document.createElement("option"); o.value = pl.img;
+          o.textContent = `${KIND[pl.kind] || "🖼️ Plate"}${pl.after_page != null ? " — after p." + pl.after_page : ""}`;
+          og.appendChild(o); });
+        ps.appendChild(og);
+      });
+    }).catch(() => {});
+
+    $("nav-vol").addEventListener("change", e => { const v = e.target.value; if (!v) return;
+      curVol = v; openReader(v, null, null, null, 0); e.target.selectedIndex = 0; });
+    letSel.addEventListener("change", e => { const L = e.target.value; if (!L) return;
+      jumpToLetter(curVol || $("nav-vol").value || "v1", L); e.target.selectedIndex = 0; });
+    $("nav-plates").addEventListener("change", e => { const img = e.target.value; if (!img) return;
+      showLightbox(img); e.target.selectedIndex = 0; });
   })();
   </script>
 </body>
