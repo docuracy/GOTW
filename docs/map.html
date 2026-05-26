@@ -726,19 +726,22 @@
 
   // ── Top-left control pane: about modal · reader volume/letter jump · plates browser ──────────────
   // jump the reader to the first entry of a letter within a volume (binary-search chunks by first headword)
-  async function jumpToLetter(vtag, letter) {     // manifest.chunk_letters = dominant letter per chunk (monotonic A→Z)
-    const m = await rGet(vtag, "manifest");
-    const cl = (m && m.chunk_letters) || [];
-    let ci = cl.indexOf(letter);                              // chunk dominated by exactly this letter (handles v7's T–Z then A–S runs)
-    if (ci < 0) {                                             // rare letter with no chunk of its own
-      ci = cl.findIndex(L => L && L >= letter);
-      if (ci < 0) ci = Math.max(0, cl.length - 1);            // letter past the end -> last chunk
-      else if (cl[ci] > letter && ci > 0) ci -= 1;            // sits in the previous chunk's tail
+  async function jumpToLetter(letter) {           // the gazetteer is alphabetical ACROSS volumes (v1 A–B … v7 T–Z)
+    await readerIndex();
+    for (const v of INDEX) {                       // first volume, in reading order, whose section reaches the letter
+      const cl = ((await rGet(v.vol, "manifest")) || {}).chunk_letters || [];
+      let ci = cl.indexOf(letter);                 // chunk dominated by exactly this letter (skips vol VII's A–S supplement)
+      if (ci < 0) {                                // letter has no chunk of its own — only count this volume if it spans the letter
+        const k = cl.findIndex(L => L && L >= letter);
+        if (k < 0) continue;                       // whole volume is below the letter -> try the next volume
+        ci = (cl[k] > letter && k > 0) ? k - 1 : k;
+      }
+      await openReader(v.vol, null, null, null, ci);
+      const hit = [...$content().querySelectorAll(".rentry")].find(a => {   // land on the first entry of the letter
+        const h = a.querySelector(".rhw"); return h && h.firstChild && alpha(h.firstChild.textContent)[0] === letter; });
+      hit && hit.scrollIntoView({ block: "start" });
+      return;
     }
-    await openReader(vtag, null, null, null, ci);
-    const hit = [...$content().querySelectorAll(".rentry")].find(a => {   // land on the first entry of the letter
-      const h = a.querySelector(".rhw"); return h && h.firstChild && alpha(h.firstChild.textContent)[0] === letter; });
-    hit && hit.scrollIntoView({ block: "start" });
   }
   (function wirePane() {
     const $ = id => document.getElementById(id);
@@ -751,12 +754,10 @@
     const letSel = $("nav-letter");                        // A–Z options
     for (let c = 65; c <= 90; c++) { const o = document.createElement("option"); o.value = o.textContent = String.fromCharCode(c); letSel.appendChild(o); }
 
-    let curVol = "v1";                                     // volume the letter-jump applies to
     readerIndex().then(idx => {                            // fill the volume select from the reader index
       const vs = $("nav-vol");
       idx.forEach(v => { const o = document.createElement("option"); o.value = v.vol;
         o.textContent = (v.title.split("—").pop() || v.vol).trim(); vs.appendChild(o); });
-      if (idx[0]) curVol = idx[0].vol;
     }).catch(() => {});
 
     const KIND = { map:"🗺️ Map", city_view:"🏙️ View", portrait:"👤 Portrait", scene:"🖼️ Scene", diagram:"📐 Diagram" };
@@ -773,9 +774,9 @@
     }).catch(() => {});
 
     $("nav-vol").addEventListener("change", e => { const v = e.target.value; if (!v) return;
-      curVol = v; openReader(v, null, null, null, 0); e.target.selectedIndex = 0; });
+      openReader(v, null, null, null, 0); e.target.selectedIndex = 0; });
     letSel.addEventListener("change", e => { const L = e.target.value; if (!L) return;
-      jumpToLetter(curVol || $("nav-vol").value || "v1", L); e.target.selectedIndex = 0; });
+      jumpToLetter(L); e.target.selectedIndex = 0; });
     $("nav-plates").addEventListener("change", e => { const img = e.target.value; if (!img) return;
       showLightbox(img); e.target.selectedIndex = 0; });
   })();

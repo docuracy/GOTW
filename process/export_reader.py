@@ -125,21 +125,29 @@ def main():
                 if target is not None:
                     target.setdefault("tables", []).extend(ts)
 
-        # Splice illustration plates into reading order: each goes after the last entry of its
-        # `after_page`; any that don't match a page (e.g. front-matter plates) trail at the volume end.
-        by_page = {}
-        for pl in plates.get(vtag, []):
-            by_page.setdefault(str(pl["after_page"]), []).append(
-                {"k": "plate", "img": pl["img"], "kind": pl.get("kind"), "title": pl.get("title"), "p": pl["after_page"]})
-        if by_page:
-            spliced = []
+        # Splice illustration plates into reading order at the entry whose page-RANGE covers their
+        # `after_page` (the entry active on that page) — same fix as the tables: an exact page-boundary
+        # match dumped most plates at the volume end. after_page=None means the plate precedes the first
+        # numbered page (front matter) -> lead the volume.
+        plist = plates.get(vtag, [])
+        if plist:
+            import bisect
+            paged = [(i, e) for i, e in enumerate(entries) if e.get("p") is not None]
+            starts = [e["p"] for _, e in paged]
+            after = {}                                   # entries-index -> [plate items]; key -1 = before all
+            for pl in plist:
+                ap = pl.get("after_page")
+                item = {"k": "plate", "img": pl["img"], "kind": pl.get("kind"), "title": pl.get("title"), "p": ap}
+                if ap is None:
+                    after.setdefault(-1, []).append(item)
+                else:
+                    j = bisect.bisect_right(starts, ap) - 1
+                    after.setdefault(paged[j][0] if j >= 0 else -1, []).append(item)
+            spliced = list(after.get(-1, []))            # front-matter plates lead the volume
             for i, e in enumerate(entries):
                 spliced.append(e)
-                nextp = entries[i + 1]["p"] if i + 1 < len(entries) else None
-                if e["p"] is not None and e["p"] != nextp:
-                    spliced += by_page.pop(str(e["p"]), [])
-            for rem in by_page.values():                 # unmatched (after_page None / out of range)
-                spliced += rem
+                if i in after:
+                    spliced += after[i]
             entries = spliced
 
         page_index = {}                                   # page -> first chunk it appears in (post-splice)
