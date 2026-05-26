@@ -39,7 +39,7 @@ The stages of *historical PDF → geolocated linked data*, and how this project 
 | **1. Parse to records** | Split the flow into one row per source record, keeping **provenance** (page). | Parse defensively: entries are delimited only by the ALL-CAPS-headword print convention — cross-references and continuations masquerade as entries; validate against spot-checks. |
 | **2. Model the target** | Decide the unit of interest and a controlled vocabulary for typing it. | Mine the *actual* descriptors for their categories; resolve to real Getty AAT ids and **validate every id** so a typo fails loudly. |
 | **3. Self-hosted LLM extraction** | Run every record through **self-hosted open models** for schema-constrained structured output. | Free (no per-token cost): a **primary extractor** (Llama-3.3-70B) + a **critic** (gpt-oss-120B) + a **repair** pass (Qwen3-thinking) on the flagged minority; closed AAT enum enforced; sharded across GPUs. Chosen by a 7-model A/B ([`docs/model-comparison.md`](docs/model-comparison.md)). |
-| **4. Reconcile / geolocate** | Match each place to WHG via a **3-pass cascade** (exact → phonetic → proximity). | Disambiguation context (country, printed coordinates) drives it; precision-first then recall, with a spatial bound so border/name changes don't pull in other-side-of-the-world matches. |
+| **4. Reconcile / geolocate** | Match each place to WHG via a **containment-aware cascade**: resolve its admin parents to WHG polygons, then match **inside the parent region** (`contained_in`) before falling back to country, then printed coordinates. | Precision-first then recall; containment disambiguates same-named places and records the parent chain as partOf relations. **84.8% of 116k places matched, ~25% via the containment passes.** |
 | **5. Publish** | Export linked data; explore it. | A static, server-less GitHub Pages explorer: PMTiles map + density heatmap, whole-corpus reader, in-browser search (FTS5 + trigram fuzzy + Symphonym phonetic via ONNX), in-context error reporting — all "fetch only what you need", no backend. |
 
 **Infrastructure dependency.** Stages 0 and 3 require the **Pitt CRC GPU cluster** (Slurm + vLLM,
@@ -53,7 +53,7 @@ The lighter steps (parse, AAT build, toponym dictionary) are plain Python (`pymu
 
 ```
 PD scans ─Surya OCR─▶ volume.txt ─parse─▶ entry ─extract─▶ place ─reconcile─▶ WHG id + coords ─▶ MapLibre demo
-(vols 1-7) (GPU array) (## p.N)             │     Llama-3.3-70B     │      3-pass: exact → phonetic → proximity
+(vols 1-7) (GPU array) (## p.N)             │     Llama-3.3-70B     │      containment cascade: in-parent→country→coords
                                    toponym-check   (self-hosted vLLM) │      (WHG gateway via public API)
                                    (toponyms.json) + gpt-oss critic
                                                    + Qwen-thinking repair (flagged ~7-11%)
@@ -122,16 +122,19 @@ What generalises:
   will **not** split the columns. So we reconstruct **two-column reading order from the recognised
   line-box geometry** (left column top-to-bottom, then right). The page marker (`## p. N`) is read from
   the running-head number in the top margin.
-- **Unruled statistical tables — detected at OCR, routed out of the prose.** The 1856 stat tables have
-  **no ruling lines**, so the layout model misses them and plain OCR linearises their cells into
-  scrambled numbers that pollute the surrounding entry (a problem we hit in the long country essays —
-  *France*, *Egypt*, *Sardinia*). *(We considered keying off the page's vertical column-separator rule,
-  which the regular two-column pages all carry — but tables also occur **inside** a separated column, so
-  the rule isn't a clean table signal.)* What works is **digit density**: `ocr_pages.py` finds runs of
-  high-digit-fraction line-boxes (≥4 lines, ≥40% numeric, bridging ≤2 non-numeric lines), per-column
-  **and** full-width, and routes those regions **out** of the reading-order text, recording a
-  `<!-- table bbox=… -->` marker per run. The prose stream stays clean; the boxed regions are digitised
-  separately by the [table pass](#5-tables-maps-and-the-demo).
+- **Unruled statistical tables — detected content-agnostically, routed out of the prose.** The 1856
+  stat tables have **no ruling lines**, so the layout model misses them and plain OCR linearises their
+  cells into scrambled numbers that pollute the surrounding entry (a problem we hit in the long country
+  essays — *France*, *Egypt*, *Sardinia*). We deliberately **don't** key off digit density (non-statistical
+  tables — concordances, equivalence lists — exist) nor the page column-rule (tables also sit *inside* a
+  column). What works is a **geometry gutter detector**: `ocr_pages.py` finds persistent vertical
+  whitespace between narrow, populated columns on the OCR line-boxes (per-column **and** full-width) and
+  routes those regions **out** of the reading-order text with a `<!-- table bbox=… -->` marker. A
+  complementary **VLM page-triage** (`triage_pages.py`, Qwen2.5-VL) classifies every page and counts its
+  embedded tables; the two detectors fail on *disjoint* pages, so table candidates are their **union**
+  and the high-res table pass self-filters false positives. The prose stream stays clean; the boxed
+  regions are digitised separately by the [table pass](#5-tables-maps-and-the-demo). (Full detector
+  evaluation in `WHG-LESSONS.md`.)
 - **Resumable + shardable.** One file per page (`p<idx>.txt`, written atomically); a page already on
   disk is skipped, so a re-run only fills gaps. `--merge` stitches a volume into one `## p. N`-marked
   `.txt` for the parser — the same format the downstream steps already understand.
@@ -197,10 +200,16 @@ split/edit, work-list sorted worst-first. Decisions are written to a **signature
 and DB rebuilds** — re-running the parser or copying a fresh DB never loses the manual calls. This is the
 local precursor to a planned gazetteer-agnostic QA module on the WHG/Django platform.
 
-**Corpus status:** all **seven volumes** are OCR'd (table-aware) and parsed into the working store
-`data/gotw_seg.sqlite` — **~92k entry blocks** (≈86.7k typed `entry` records to extract, plus
-cross-references and the Vol VII back-matter). Volume I alone is ~11.4k entries · ~813 cross-references
-· ~1,426 multi-place entries (via `—Also`), pages 3–896.
+**Corpus status — the full pipeline has run end-to-end.** All **seven volumes** are OCR'd (table-aware),
+parsed, extracted, table/plate-digitised, reconciled, and published. Working store `data/gotw_seg.sqlite`:
+**89,816 entries → 116,292 places** (84.8% reconciled to WHG), **1,774 vision tables** + **133 plates**
+embedded in the reader. Volume I alone is ~11.4k entries · ~813 cross-references · ~1,426 multi-place
+entries (via `—Also`), pages 3–896. The repo lives at
+[`WorldHistoricalGazetteer/gazetteer-of-the-world`](https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world);
+the live explorer is at
+[worldhistoricalgazetteer.github.io/gazetteer-of-the-world](https://worldhistoricalgazetteer.github.io/gazetteer-of-the-world/map.html).
+**The whole pipeline runs on the CRC via [`process/run_pipeline.sh`](process/run_pipeline.sh)** (staged
+Slurm submission with `--list`/`--dry-run`/`--from`/`--only`).
 
 > **Validation experiment — a reference-free OCR/segmentation check with a vision-LLM.** Because we
 > self-host a vision model anyway, we tried using it to *independently* list each page's entry headings
@@ -329,19 +338,25 @@ python3 process/reconcile.py --backend api --concurrency 6      # public-API fal
 python3 process/submit_reconcile_slurm.py                       # ingest + cascade as an htc CPU job
 ```
 
-A **3-pass cascade**, each pass run only on the previous one's misses (precision first, then recall),
-thresholding on `score`:
+A **containment-aware cascade**. First (gateway only) each place's `admin_hierarchy` is resolved
+top-down to WHG **polygon** parents — each `contained_in` the previously-resolved parent, the country
+level handled by the `ccodes` proxy — and the chain is recorded as Linked-Places `gvp:broaderPartitive`
+relations. The leaf then runs five passes, each only on the previous one's misses (precision first, then
+recall), thresholding on `score`:
 
-| Pass | `mode` | country | spatial |
-|---|---|---|---|
-| **1** exact | `exact` | strict (`ccodes=[cc]`) | — |
-| **2** phonetic | `phonetic` (Symphonym KNN) | strict | — |
-| **3** proximity | `phonetic` | dropped | `bounds` box around the **printed** coords |
+| Pass | `mode` | spatial constraint |
+|---|---|---|
+| **1** exact-in   | `exact` | `contained_in` narrowest parent, `relation=within` |
+| **2** phon-in    | `phonetic` (Symphonym KNN) | `contained_in` narrowest parent, `intersects` |
+| **3** phon-broad | `phonetic` | `contained_in` next-broader parent |
+| **4** phon-cc    | `phonetic` | country only (`ccodes`) |
+| **5** coords     | `phonetic` | `bounds` box around the **printed** coords |
 
-Pass 3 lets borders/spellings change but **bounds the search spatially** — a renamed place is found
-near its printed coordinates, never on the other side of the world (validated: *Luroe*→*Lurøy* via the
-box). Demo: **8/8** (7 exact, 1 proximity). Matches get `whg_match_id`, `whg_score`, the pass that found
-them, and a centroid.
+`ccodes=[cc]` applies throughout. Containment uses `containment="exact"` (precise polygon test) — the
+gateway's `fuzzy`/H3 mode currently returns 0 even for genuinely-contained places. **Full corpus
+(116,292 places): 98,581 matched (84.8%), of which 28,849 are disambiguated by the containment passes**
+— the right instance *inside* its named parent, not merely a same-named place elsewhere in the country.
+Matches get `whg_match_id`, `whg_score`, the pass that found them, and a centroid.
 
 **Two backends, same cascade** (`exact`/`phonetic`, country, and `bounds` are all honoured server-side;
 never filter by `types`/`fclasses` — sparsely populated, tanks recall; threshold on `score`, not the

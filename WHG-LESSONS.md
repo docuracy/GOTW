@@ -52,8 +52,10 @@ A six-stage pipeline turns 7 volumes of 1856 print into typed, geolocated, linke
    GPUs) with **schema-constrained output** and a **closed Getty-AAT enum**, producing one structured record
    per place (name + variants, AAT type, country/ISO, admin, coordinates *only when printed*, population
    series, ethnonyms).
-5. **Reconcile** — a 3-pass cascade against the WHG gateway: exact → **phonetic (Symphonym KNN)** → proximity
-   (spatially bounded), precision-first.
+5. **Reconcile** — a **containment-aware cascade** against the WHG gateway: resolve each place's admin
+   parents to WHG **polygons**, then exact/phonetic (Symphonym KNN) matches **scoped inside the parent**
+   (`contained_in`, `containment="exact"`) → country → printed-coordinate fallback; precision-first.
+   116k places, **84.8% matched, ~25% disambiguated by containment** (the right same-named instance).
 6. **Publish** — export to PMTiles + the sharded detail store + the chunked reader + the FTS/Symphonym search
    indexes; deploy to Pages.
 
@@ -279,4 +281,6 @@ Concrete next steps, in rough order of value-to-effort:
 *Generated from the GOTW project; see `README.md` for the full pipeline and `process/` for the scripts behind
 each stage (`ocr_pages.py`, `parse_ocr.py`, `extract.py`, `reconcile.py`, `triage_pages.py`,
 `extract_tables.py`, `export_plates.py`, `export_geojson.py`, `build_tiles.sh`, `export_reader.py`,
-`build_search_db.py`, `export_symphonym_onnx.py`, `build_symphonym_index.py`).*
+`build_search_db.py`, `export_symphonym_onnx.py`, `build_symphonym_index.py`) — all chained end-to-end on
+the CRC by `process/run_pipeline.sh` (`--list`/`--dry-run`/`--from`/`--only`). Repo:
+`WorldHistoricalGazetteer/gazetteer-of-the-world`.*
