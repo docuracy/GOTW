@@ -110,19 +110,20 @@ def main():
                 e["tables"] = tables[r["entry_id"]]
             entries.append(e)
 
-        # Attach page-keyed vision tables (entry_id NULL) to the LAST entry of their page, so they
-        # render inline via the same e["tables"] path as entry-level tables. (Plates, below, splice as
-        # standalone items.) A page with tables but no entries is rare; such tables trail the volume end.
+        # Attach page-keyed vision tables (entry_id NULL) to the entry whose page-RANGE covers them — the
+        # last entry that started on or before the table's page. A table on page 405 of a long FRANCE
+        # essay belongs to FRANCE, whose headword is back on page 400; matching only the table's OWN page
+        # orphans every table on a non-headword page (i.e. most of them, since the stat tables cluster in
+        # the multi-page country essays). They render inline via the same e["tables"] path as entry tables.
         if page_tables:
-            seen_pages = set()
-            for i, e in enumerate(entries):
-                p = e.get("p")
-                nextp = entries[i + 1]["p"] if i + 1 < len(entries) else None
-                if p is not None and p != nextp and p in page_tables:
-                    e.setdefault("tables", []).extend(page_tables[p]); seen_pages.add(p)
-            orphan = [t for p, ts in page_tables.items() if p not in seen_pages for t in ts]
-            if orphan and entries:
-                entries[-1].setdefault("tables", []).extend(orphan)
+            import bisect
+            paged = sorted((e for e in entries if e.get("p") is not None), key=lambda e: e["p"])
+            starts = [e["p"] for e in paged]
+            for pg, ts in page_tables.items():
+                j = bisect.bisect_right(starts, pg) - 1
+                target = paged[j] if j >= 0 else (paged[0] if paged else None)
+                if target is not None:
+                    target.setdefault("tables", []).extend(ts)
 
         # Splice illustration plates into reading order: each goes after the last entry of its
         # `after_page`; any that don't match a page (e.g. front-matter plates) trail at the volume end.
@@ -146,12 +147,23 @@ def main():
             if e.get("p") is not None:
                 page_index.setdefault(str(e["p"]), i // cs)
         nchunks = (len(entries) + cs - 1) // cs
+        # Dominant first-letter per chunk — the alphabetical backbone for the A–Z jump. Using the per-chunk
+        # majority letter (not the first occurrence) is robust to the out-of-order headwords that "—Also"
+        # sub-entries and cross-references scatter through reading order; the result is monotonic A→Z.
+        chunk_letters = []
         for c in range(nchunks):
+            cnt = {}
+            for e in entries[c * cs:(c + 1) * cs]:
+                L = next((ch for ch in (e.get("hw") or "").upper() if "A" <= ch <= "Z"), None)
+                if L:
+                    cnt[L] = cnt.get(L, 0) + 1
+            chunk_letters.append(max(cnt, key=cnt.get) if cnt else "")
             flush(entries[c * cs:(c + 1) * cs], c)
         vnum = vtag[1:]
         (voldir / "manifest.json").write_text(json.dumps({
             "vol": vtag, "title": f"A Gazetteer of the World — Vol. {ROMAN.get(vnum, vnum)}",
-            "chunks": nchunks, "chunk_size": cs, "count": len(entries), "page_index": page_index},
+            "chunks": nchunks, "chunk_size": cs, "count": len(entries),
+            "page_index": page_index, "chunk_letters": chunk_letters},
             ensure_ascii=False))
         print(f"{vtag}: {len(entries)} entries -> {nchunks} chunks ({len(page_index)} pages) in {voldir}/")
 

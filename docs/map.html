@@ -181,6 +181,14 @@
         containment-aware cascade (resolve the admin parents to polygons, then match <i>inside</i> the parent
         region). All LLM/VLM stages are self-hosted — no per-token cost.
         <b>116,292 places · 84.8% reconciled · 1,774 tables · 133 plates.</b></p>
+        <h3>Caveats — please read</h3>
+        <p>This is a <b>research demonstrator, not an authority</b>. Reconciliation to the WHG is fully
+        <b>automatic and a work in progress</b>: <b>a great many matches are wrong</b> (a same-named place
+        elsewhere, or no real equivalent at all), and automatic matching of historical names will never be
+        fully resolved. Table and plate detection is <b>patchy</b> — some are missed, mislocated, or
+        mis-transcribed. Treat every located point, match, and digitised table as a <b>suggestion to verify
+        against the source page</b> (each record links to its scan), not as ground truth — and please flag
+        errors with the <b>⚑ Report</b> link in any popup or reader entry.</p>
         <h3>Origin &amp; credits</h3>
         <p>The project arose from Humphrey Southall's offer of his transcripts to Ruth Mostern and the resulting
         discussion; it uses its own public-domain OCR rather than those transcripts. Source code &amp; method:
@@ -718,18 +726,15 @@
 
   // ── Top-left control pane: about modal · reader volume/letter jump · plates browser ──────────────
   // jump the reader to the first entry of a letter within a volume (binary-search chunks by first headword)
-  async function jumpToLetter(vtag, letter) {
-    await readerIndex();
-    const vi = INDEX.findIndex(v => v.vol === vtag); if (vi < 0) return;
-    const nch = INDEX[vi].chunks;
-    const firstOf = async ci => { try { const d = await rGet(vtag, ci);
-      const e = d.find(x => x.k !== "plate" && x.hw); return e ? (alpha(e.hw)[0] || "") : ""; } catch { return ""; } };
-    let lo = 0, hi = nch - 1, c1 = nch;                     // first chunk whose first letter >= the target
-    while (lo <= hi) { const mid = (lo + hi) >> 1; const f = await firstOf(mid);
-      if (f && f >= letter) { c1 = mid; hi = mid - 1; } else lo = mid + 1; }
-    let ci;
-    if (c1 >= nch) ci = nch - 1;                            // letter past the last chunk -> last chunk
-    else { const f1 = await firstOf(c1); ci = (f1 > letter && c1 > 0) ? c1 - 1 : c1; }   // overshoot -> chunk before
+  async function jumpToLetter(vtag, letter) {     // manifest.chunk_letters = dominant letter per chunk (monotonic A→Z)
+    const m = await rGet(vtag, "manifest");
+    const cl = (m && m.chunk_letters) || [];
+    let ci = cl.indexOf(letter);                              // chunk dominated by exactly this letter (handles v7's T–Z then A–S runs)
+    if (ci < 0) {                                             // rare letter with no chunk of its own
+      ci = cl.findIndex(L => L && L >= letter);
+      if (ci < 0) ci = Math.max(0, cl.length - 1);            // letter past the end -> last chunk
+      else if (cl[ci] > letter && ci > 0) ci -= 1;            // sits in the previous chunk's tail
+    }
     await openReader(vtag, null, null, null, ci);
     const hit = [...$content().querySelectorAll(".rentry")].find(a => {   // land on the first entry of the letter
       const h = a.querySelector(".rhw"); return h && h.firstChild && alpha(h.firstChild.textContent)[0] === letter; });
