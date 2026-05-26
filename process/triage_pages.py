@@ -33,7 +33,8 @@ class Triage(BaseModel):
     type: Literal["prose", "plate", "blank"]          # running text / full-page illustration / empty
     n_tables: int                                     # embedded statistical tables (prose only, else 0)
     n_images: int                                     # embedded illustrations/figures (prose only, else 0)
-    plate_kind: Optional[Literal["map", "city_view", "portrait", "scene", "diagram", "other"]]
+    plate_kind: Optional[Literal["map", "city_view", "landscape"]]   # plates only (this corpus has no portraits)
+    plate_title: Optional[str]                                       # plates only: engraved caption if legible, else a short title
 
 
 SCHEMA = Triage.model_json_schema()
@@ -42,10 +43,12 @@ for _n in (SCHEMA, *SCHEMA.get("$defs", {}).values()):
         _n["additionalProperties"] = False
 PROMPT = ("This is a full page from an 1856 printed gazetteer, shown at low resolution. Classify the page "
           "type: 'prose' (running text in columns, which may contain embedded tables or illustrations), "
-          "'plate' (a full-page illustration, map, or portrait), or 'blank' (empty / endpaper / library "
-          "stamp only). If prose, set n_tables = number of distinct statistical tables embedded and "
-          "n_images = number of embedded illustrations/figures (0 if none). If plate, set plate_kind. "
-          "All counts are 0 when not applicable.")
+          "'plate' (a full-page illustration: a map, a view of a place, or scenery), or 'blank' (empty / "
+          "endpaper / library stamp only). If prose, set n_tables = number of distinct statistical tables "
+          "embedded and n_images = number of embedded illustrations/figures (0 if none). If plate, set "
+          "plate_kind = 'map', 'city_view' (a view/panorama of a town or place), or 'landscape' (natural "
+          "scenery or a topographic feature), and plate_title = the engraved caption if legible, else a short "
+          "descriptive title. All counts are 0 / fields null when not applicable.")
 
 
 def jpeg_lowres(path: Path, maxpx: int) -> bytes:
@@ -62,7 +65,7 @@ def triage_one(jpeg: bytes) -> Optional[Triage]:
         "messages": [{"role": "user", "content": [
             {"type": "text", "text": PROMPT},
             {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()}}]}],
-        "max_tokens": 96, "temperature": 0,    # fields come first; a whitespace-loop is cut short + salvaged
+        "max_tokens": 160, "temperature": 0,   # room for plate_title; fields come first, a whitespace-loop is cut + salvaged
         "response_format": {"type": "json_schema", "json_schema": {"name": "Triage", "schema": SCHEMA, "strict": True}},
     }).encode()
     for attempt in range(4):
@@ -96,14 +99,18 @@ def _salvage(txt):
         return None
     nt = re.search(r'"n_tables"\s*:\s*(\d+)', txt)
     ni = re.search(r'"n_images"\s*:\s*(\d+)', txt)
-    pk = re.search(r'"plate_kind"\s*:\s*"(map|city_view|portrait|scene|diagram|other)"', txt)
+    pk = re.search(r'"plate_kind"\s*:\s*"(map|city_view|landscape)"', txt)
+    pt = re.search(r'"plate_title"\s*:\s*"([^"]*)"', txt)
     return Triage(type=ty.group(1), n_tables=int(nt.group(1)) if nt else 0,
-                  n_images=int(ni.group(1)) if ni else 0, plate_kind=pk.group(1) if pk else None)
+                  n_images=int(ni.group(1)) if ni else 0, plate_kind=pk.group(1) if pk else None,
+                  plate_title=(pt.group(1) if pt else None))
 
 
 def ensure_schema(con):
     con.execute("CREATE TABLE IF NOT EXISTS page_triage (volume TEXT, idx INTEGER, type TEXT, n_tables INTEGER,"
-                " n_images INTEGER, plate_kind TEXT, created_at TEXT, PRIMARY KEY(volume, idx))")
+                " n_images INTEGER, plate_kind TEXT, plate_title TEXT, created_at TEXT, PRIMARY KEY(volume, idx))")
+    if "plate_title" not in {r[1] for r in con.execute("PRAGMA table_info(page_triage)")}:
+        con.execute("ALTER TABLE page_triage ADD COLUMN plate_title TEXT")   # migrate older DBs
     con.commit()
 
 
@@ -140,8 +147,8 @@ def main():
             i, t = fut.result()
             if t is None:
                 fail += 1; continue
-            con.execute("INSERT OR REPLACE INTO page_triage(volume,idx,type,n_tables,n_images,plate_kind,created_at)"
-                        " VALUES(?,?,?,?,?,?,?)", (args.volume, i, t.type, t.n_tables, t.n_images, t.plate_kind, now))
+            con.execute("INSERT OR REPLACE INTO page_triage(volume,idx,type,n_tables,n_images,plate_kind,plate_title,created_at)"
+                        " VALUES(?,?,?,?,?,?,?,?)", (args.volume, i, t.type, t.n_tables, t.n_images, t.plate_kind, t.plate_title, now))
             kinds[t.type] += 1; n += 1
             if n % 100 == 0:
                 con.commit(); print(f"  …{n}/{len(todo)} {dict(kinds)}", flush=True)

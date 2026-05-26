@@ -456,8 +456,7 @@
   }
   function entryHTML(en, hi, vlabel) {
     if (en.k === "plate") {         // illustration plate spliced into reading order; click -> full-screen
-      const cap = esc(en.title || ({map:"Map", city_view:"View", portrait:"Portrait", scene:"Scene",
-                                     diagram:"Diagram"}[en.kind] || "Illustration plate"));
+      const cap = esc(en.title || ({map:"Map", city_view:"View", landscape:"Landscape"}[en.kind] || "Plate"));
       const tag = en.kind === "map" ? "🗺️ " : "🖼️ ";
       return `<figure class="rplate"><img src="${en.img}" loading="lazy" alt="${cap}" data-full="${en.img}">`
            + `<figcaption>${tag}${cap}${en.p ? ` — near p.${en.p}` : ""}</figcaption></figure>`;
@@ -796,7 +795,7 @@
         o.textContent = (v.title.split("—").pop() || v.vol).trim(); vs.appendChild(o); });
     }).catch(() => {});
 
-    const KIND = { map:"🗺️ Map", city_view:"🏙️ View", portrait:"👤 Portrait", scene:"🖼️ Scene", diagram:"📐 Diagram" };
+    const KIND = { map:"🗺️ Map", city_view:"🏙️ View", landscape:"🏞️ Landscape" };
     fetch("./plates/manifest.json").then(r => r.ok ? r.json() : {}).then(m => {   // fill the plates browser
       const ps = $("nav-plates");
       Object.keys(m).sort().forEach(v => {

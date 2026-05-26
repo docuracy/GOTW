@@ -111,6 +111,21 @@ def after_page_map(ocr_path: str) -> dict:
     return out
 
 
+def best_rotation(im, rec, det, px=1600):
+    """Degrees CLOCKWISE to display the plate upright. Only the upright orientation OCRs confidently, so
+    score each of the 4 rotations by confidence-weighted recognised-text length and pick the max. (Reliable
+    except rare 90/270 near-ties; the VLM can't do this — it reads rotated text fine, so it never flags it.)"""
+    s = im.convert("RGB"); s.thumbnail((px, px))
+    best_deg, best_sc = 0, -1.0
+    for deg in (0, 90, 180, 270):
+        r = s.rotate(-deg, expand=True) if deg else s
+        res = rec([r], det_predictor=det)[0]
+        sc = sum(len((ln.text or "").strip()) * float(ln.confidence or 0.0) for ln in res.text_lines)
+        if sc > best_sc:
+            best_deg, best_sc = deg, sc
+    return best_deg
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--img-dir", required=True, help="page-image directory for the volume")
@@ -122,6 +137,8 @@ def main():
     ap.add_argument("--from-triage", action="store_true",
                     help="take plates from VLM page_triage (type='plate', with plate_kind) — no ink filter / re-classify")
     ap.add_argument("--triage-db", help="sqlite holding page_triage (default: --db)")
+    ap.add_argument("--orient", action="store_true",
+                    help="detect + correct plate orientation with Surya (OCR-confidence over the 4 rotations)")
     ap.add_argument("--dry-run", action="store_true", help="ink filter only, no classification/export")
     args = ap.parse_args()
 
@@ -138,18 +155,29 @@ def main():
     if args.from_triage:
         tdb = sqlite3.connect(args.triage_db or args.db)
         apm = after_page_map(args.ocr)
-        plates = [(i, k) for i, k in tdb.execute(
-            "SELECT idx, plate_kind FROM page_triage WHERE volume=? AND type='plate'", (args.volume,)) if i < len(files)]
+        cols = {r[1] for r in tdb.execute("PRAGMA table_info(page_triage)")}
+        tcol = "plate_title" if "plate_title" in cols else "NULL"
+        plates = [(i, k, t) for i, k, t in tdb.execute(
+            f"SELECT idx, plate_kind, {tcol} FROM page_triage WHERE volume=? AND type='plate'", (args.volume,)) if i < len(files)]
+        rec = det = None
+        if args.orient:                                   # load Surya once for orientation detection
+            import sys as _sys; _sys.path.insert(0, "process")
+            import ocr_pages as _ocr; rec, det, _ = _ocr._models()
         recs, kinds = [], Counter()
-        for idx, kind in sorted(plates):
-            web = Image.open(files[idx]).convert("RGB"); web.thumbnail((args.max_px, args.max_px))
+        for idx, kind, title in sorted(plates):
+            im = Image.open(files[idx]).convert("RGB")
+            if args.orient and rec is not None:
+                deg = best_rotation(im, rec, det)
+                if deg:
+                    im = im.rotate(-deg, expand=True)
+            web = im.copy(); web.thumbnail((args.max_px, args.max_px))
             web.save(outdir / f"p{idx:05d}.jpg", "JPEG", quality=82)
-            recs.append({"idx": idx, "after_page": apm.get(idx), "kind": kind, "title": None,
+            recs.append({"idx": idx, "after_page": apm.get(idx), "kind": kind, "title": title,
                          "img": f"plates/{args.volume}/p{idx:05d}.jpg"})
             kinds[kind or "plate"] += 1
         manifest[args.volume] = recs
         man_path.write_text(json.dumps(manifest, ensure_ascii=False))
-        print(f"{args.volume}: exported {len(recs)} triage plates {dict(kinds)} -> {outdir}/")
+        print(f"{args.volume}: exported {len(recs)} triage plates {dict(kinds)} -> {outdir}/", flush=True)
         return
 
     pages = [(i, a) for i, a in plate_pages(args.ocr) if i < len(files)]

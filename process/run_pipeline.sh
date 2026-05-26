@@ -183,7 +183,7 @@ kill \$SRVPID 2>/dev/null||true; sleep 5
 echo "--- plates (CPU, from triage) ---"
 conda activate $WHG_ENV
 rm -rf docs/plates; mkdir -p docs/plates
-for v in $VOLS; do python -u process/export_plates.py --from-triage --triage-db data/triage.sqlite --db $DB --volume v\$v --img-dir img/v\$v --ocr txt/gotw-v\$v-ocr.txt --out docs/plates; done
+for v in $VOLS; do python -u process/export_plates.py --from-triage --orient --max-px 2400 --triage-db data/triage.sqlite --db $DB --volume v\$v --img-dir img/v\$v --ocr txt/gotw-v\$v-ocr.txt --out docs/plates; done
 echo vlm_DONE
 EOF
   submit_wait gpu "$f" "vlm (triage+tables+plates)"
