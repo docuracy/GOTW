@@ -259,14 +259,7 @@ Concrete next steps, in rough order of value-to-effort:
    and harbours**, etc. These become facets for search/filtering and additional reconcilable sub-entities,
    turning each essay into several typed records rather than one.
 
-2. **Condense the top bar into a single top-left control pane.** Replace the wide header with a compact
-   panel: a short **title**; an **ⓘ info button** opening a modal with the full project description + source
-   (RGS 1856, the self-OCR rationale, credits/origin); the **search input with its `phonetic` toggle**; and a
-   **dropdown to jump the reader** to any volume, any index letter within a volume, or any **Appendix**. A
-   second dropdown could index the **identified plates** (now that triage classifies them with `plate_kind`
-   and titles) and open them in the reader/lightbox — effectively a "list of illustrations/maps" per volume.
-
-3. **A georeferencer / reconciliation module in the UI — let users suggest matches and/or geometries.**
+2. **A georeferencer / reconciliation module in the UI — let users suggest matches and/or geometries.**
    Automated reconciliation leaves a long tail (no confident WHG match, or a *wrong* one). Add a UI affordance
    on each place: surface the candidate matches the cascade considered (and their `has_geom`/`contained_in`
    context), let a user **confirm/override the WHG match** or **draw/drop a geometry** (point, or a polygon for
