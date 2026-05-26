@@ -396,7 +396,7 @@ handling the offset drift (16→80) caused by ~70 unpaginated steel plates that 
   mixed in. `process/pdf_coverage.py` reports each volume's head-word range so the seven tile A–Z without
   overlap or gap. (Tables/maps recover from the 600 dpi page images directly; the searchable per-volume
   PDF built by `process/build_pdf.py` is now mainly an archival artifact, since OCR reads the images.)
-- **A static, server-less explorer** — live at [docuracy.github.io/GOTW/map.html](https://docuracy.github.io/GOTW/map.html).
+- **A static, server-less explorer** — live at [worldhistoricalgazetteer.github.io/gazetteer-of-the-world/map.html](https://worldhistoricalgazetteer.github.io/gazetteer-of-the-world/map.html).
   Everything is served from **GitHub Pages with no backend**, leaning on "fetch only what you need" formats. It
   is deployed via a **GitHub Actions Pages artifact** (`.github/workflows/pages.yml`); the large generated files
   live in a **GitHub Release** (`site-assets`, re-published by `process/publish_assets.sh`) so they're served

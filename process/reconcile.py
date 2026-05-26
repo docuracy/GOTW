@@ -51,7 +51,7 @@ import requests
 
 GATEWAY_URL = os.getenv("WHG_GATEWAY_URL", "http://gazetteer-clus.crc.pitt.edu:9200")
 DO_URL = "https://whgazetteer.org/reconcile"
-USER_AGENT = "GOTW-reconcile/0.3 (https://github.com/docuracy/GOTW; stephen@docuracy.co.uk)"
+USER_AGENT = "GOTW-reconcile/0.3 (https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world; stephen@docuracy.co.uk)"
 CHUNK = 25                # queries per DO-API POST (batched); gateway is one query per POST
 DEFAULT_THRESHOLD = 80
 DEFAULT_RADIUS_KM = 150

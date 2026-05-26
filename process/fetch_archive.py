@@ -22,7 +22,7 @@ import argparse, re, sys, time
 from pathlib import Path
 import requests
 
-UA = {"User-Agent": "GOTW-research/0.1 (https://github.com/docuracy/GOTW; public-domain volumes)"}
+UA = {"User-Agent": "GOTW-research/0.1 (https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world; public-domain volumes)"}
 HEAD_BYTES = 140_000
 RUNHEAD = re.compile(r"^[A-Z][A-Z0-9 .,'’\-&]{2,40}$")
 SKIP = {"THE GAZETTEER", "GAZETTEER OF THE WORLD", "DICTIONARY OF GEOGRAPHICAL KNOWLEDGE",

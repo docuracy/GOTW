@@ -185,7 +185,7 @@
       link: eid != null ? `${location.origin}${location.pathname}?entry=${eid}` : "",   // open this entry in the explorer
       meta: JSON.stringify({ eid: eid ?? null, vol: volLabel || null, page: page ?? null, headword: headword || null }),
     });
-    return `https://github.com/docuracy/GOTW/issues/new?${qs.toString()}`;
+    return `https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world/issues/new?${qs.toString()}`;
   }
 
   // Surface existing reports in popups: fetch the repo's `explorer-report` issues ONCE (cached ~5 min, to
@@ -194,7 +194,7 @@
   async function reportsByEid() {
     if (_reps && Date.now() - _repsAt < 300000) return _reps;
     try {
-      const r = await fetch("https://api.github.com/repos/docuracy/GOTW/issues?labels=explorer-report&state=all&per_page=100",
+      const r = await fetch("https://api.github.com/repos/WorldHistoricalGazetteer/gazetteer-of-the-world/issues?labels=explorer-report&state=all&per_page=100",
                             { headers: { Accept: "application/vnd.github+json" } });
       if (!r.ok) throw 0;
       const map = {};
