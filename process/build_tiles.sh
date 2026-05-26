@@ -24,15 +24,14 @@ python3 process/export_geojson.py --db "$DB" --out "$GEOJSONL"
 
 echo "2/2  tippecanoe -> $OUT"
 # -l places             : single named layer (map.html references source-layer "places")
-# -zg                   : choose max zoom automatically from feature density (a full pyramid, not just z0)
-# --cluster-distance=8  : below maxzoom, merge points within ~8px into a representative leader carrying a
-#                         `point_count`. This is what makes the LOW-ZOOM HEATMAP both light and accurate:
-#                         few features, density preserved as a weight. At maxzoom points are unclustered,
-#                         so each keeps its own id for click -> detail.
-# -r1                   : drop-rate 1 = no rate-thinning; clustering is the SOLE reducer, so point_count
-#                         sums are exact (NOT --drop-densest-as-needed, which equalises and flattens density).
+# -z9 --cluster-maxzoom=6 : cluster ONLY up to z6 (the low-zoom density HEATMAP, weighted by point_count);
+#                         at z7+ clustering is OFF so EVERY place is an individual feature with its own id —
+#                         so zooming in always yields a visible circle/marker per place (not a heatmap blob).
+#                         z9 max gives a couple of unclustered levels to overzoom from.
+# --cluster-distance=8  : within the clustered zooms, merge points within ~8px into a representative leader.
+# -r1                   : drop-rate 1 = no rate-thinning; clustering is the sole reducer (exact point_count).
 tippecanoe -o "$OUT" -f -l places \
-  -zg --cluster-distance=8 -r1 \
+  -z9 --cluster-distance=8 --cluster-maxzoom=6 -r1 \
   "$GEOJSONL"
 
 echo "done -> $OUT"

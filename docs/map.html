@@ -315,13 +315,13 @@
   const popFactor = ["case", ["has", "pn"], ["+", POP_MIN, ["*", POP_MAX - POP_MIN, ["get", "pn"]]], 1];
   const PAINT = {
     "circle-radius": ["interpolate", ["linear"], ["zoom"],
-      4, ["*", 3, popFactor],
+      6, ["*", 2.5, popFactor],
       10, ["*", 7, popFactor]],
     "circle-color": ["match",["get","fclass"],
       "P",COLORS.P,"A",COLORS.A,"H",COLORS.H,"T",COLORS.T,"S",COLORS.S,"X",COLORS.X, "#777"],
     "circle-stroke-width": 1, "circle-stroke-color": "#fff",
-    "circle-opacity": ["interpolate",["linear"],["zoom"], 5,0, 7,.9],
-    "circle-stroke-opacity": ["interpolate",["linear"],["zoom"], 5,0, 7,.9]
+    "circle-opacity": ["interpolate",["linear"],["zoom"], 6,0, 7,.9],
+    "circle-stroke-opacity": ["interpolate",["linear"],["zoom"], 6,0, 7,.9]
   };
   // Density heatmap for low zooms, weighted by the cluster point_count baked in by tippecanoe
   // (coalesce -> 1 for unclustered points). Fades out by ~z7.5 as the circles take over.
@@ -332,7 +332,7 @@
     "heatmap-weight": ["interpolate",["linear"],["coalesce",["get","point_count"],1], 1,.2, 60,1],
     "heatmap-intensity": ["interpolate",["linear"],["zoom"], 0,.9, 4,1.1, 7,1.6],
     "heatmap-radius": ["interpolate",["linear"],["zoom"], 0,45, 2,42, 4,36, 6,32, 7,30],
-    "heatmap-opacity": ["interpolate",["linear"],["zoom"], 5,.85, 7.5,0],
+    "heatmap-opacity": ["interpolate",["linear"],["zoom"], 6,.85, 7.5,0],
     "heatmap-color": ["interpolate",["linear"],["heatmap-density"],
       0,"rgba(255,255,178,0)", .08,"rgba(255,237,160,.7)", .3,"#fed976", .5,"#feb24c",
       .65,"#fd8d3c", .8,"#fc4e2a", .9,"#e31a1c", 1,"#bd0026"]
@@ -361,10 +361,16 @@
     if (!_geoP) _geoP = fetch("./search/geocoded.json").then(r => r.ok ? r.json() : {}).then(g => (GEO = g)).catch(() => (GEO = {}));
     return _geoP;
   }
-  let placePopup = null;   // single shared popup so they don't accumulate
+  let placePopup = null, placeMarker = null;   // single shared popup + a pin marking the selected place
   async function openPlacePopup(lngLat, id, name) {   // map popup for a place (map click OR search/reader)
     if (placePopup) placePopup.remove();
+    // Always drop a pin at the selected place. Most places sit in a tippecanoe cluster (point_count) so they
+    // have NO individual circle even at max zoom — without this, selecting a place flew there but showed no
+    // marker. The pin is independent of the tile clustering and of point vs line/polygon geometry.
+    if (placeMarker) placeMarker.remove();
+    placeMarker = new maplibregl.Marker({ color: "#c2410c" }).setLngLat(lngLat).addTo(map);
     const popup = placePopup = new maplibregl.Popup({ maxWidth: "320px" }).setLngLat(lngLat).addTo(map);
+    popup.on("close", () => { if (placeMarker) { placeMarker.remove(); placeMarker = null; } });
     popup.setHTML(`<div class="pop"><h3>${esc(name || "")}</h3><p class="meta">loading…</p></div>`);
     let detail;
     try { detail = await getDetail(id); }
@@ -383,7 +389,7 @@
     // Circles only for INDIVIDUAL places (cluster leaders carry point_count and feed only the heatmap),
     // so a click always resolves to one real place; dense areas stay heatmap until you zoom in enough.
     map.addLayer({ id: "pts", type: "circle", source: "places", "source-layer": SRC.layer,
-      minzoom: 5, filter: ["!", ["has", "point_count"]], paint: PAINT });
+      minzoom: 6, filter: ["!", ["has", "point_count"]], paint: PAINT });
     map.on("click", "pts", e => {
       const p = e.features[0].properties;
       const at = e.features[0].geometry?.coordinates?.slice ? e.features[0].geometry.coordinates : e.lngLat;
@@ -532,7 +538,7 @@
   function locateOnMap(lon, lat, pid, name) {   // close modal, fly to the place, open its popup
     hideModal();
     const ll = [+lon, +lat];
-    map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 7) });
+    map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 8) });
     openPlacePopup(ll, +pid, name);
   }
   async function openEntry(eidStr) {            // ?entry=<eid> deep link (e.g. from an error-report issue)
@@ -541,7 +547,7 @@
     let row = null;                             // locate vol/page/rc/headword from the FTS doc table (covers all entries)
     try { const w = await searchDb(); row = (await w.db.query("SELECT vol,page,rc,headword FROM doc WHERE eid=?", [eid]))[0]; } catch {}
     const g = GEO[eid];
-    if (g) { const ll = [g[0], g[1]]; map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 7) }); openPlacePopup(ll, g[2], row && row.headword); }
+    if (g) { const ll = [g[0], g[1]]; map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 8) }); openPlacePopup(ll, g[2], row && row.headword); }
     else if (row) openReader(row.vol, row.page, row.headword, eid, row.rc);
   }
   // Zoomable full-screen plate viewer: scroll to zoom (about the cursor), drag to pan, double-click to reset.
@@ -750,7 +756,7 @@
       $res().hidden = true;
       if (b.dataset.lon) {            // geocoded -> zoom the map and open its popup
         const ll = [+b.dataset.lon, +b.dataset.lat];
-        map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 7) });
+        map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 8) });
         openPlacePopup(ll, +b.dataset.pid, b.dataset.hw);
       } else {                        // not geocoded -> open the source text in the reader
         openReader(b.dataset.vol, b.dataset.page, b.dataset.hw, b.dataset.eid ? +b.dataset.eid : null, b.dataset.rc !== "" ? +b.dataset.rc : null);
