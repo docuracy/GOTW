@@ -4,69 +4,1000 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-  <title>Gazetteer of the World → Linked Data</title>
+  <title>Gazetteer of the World — extracted places</title>
+  <link href="./lib/maplibre-gl.css" rel="stylesheet" />
+  <script src="./lib/maplibre-gl.js"></script>
+  <script src="./lib/pmtiles.js"></script>
+  <script src="./search/lib/index.js"></script>   <!-- sql.js-httpvfs (UMD -> window.createDbWorker) -->
+  <script src="./lib/onnx/ort.wasm.min.js"></script>   <!-- onnxruntime-web (window.ort) for phonetic search -->
+
   <style>
-    :root { --ink:#1a2438; --sea:#2a6f97; --paper:#f7f4ec; }
-    * { box-sizing: border-box; }
-    body { margin:0; font:16px/1.6 Georgia, "Times New Roman", serif;
-           color:var(--ink); background:var(--paper); }
-    header { padding:3rem 1.5rem 2rem; max-width:760px; margin:0 auto; }
-    h1 { font-size:2rem; margin:0 0 .3rem; }
-    .sub { color:var(--sea); font-style:italic; margin:0 0 1.5rem; }
-    main { max-width:760px; margin:0 auto; padding:0 1.5rem 4rem; }
-    h2 { font-size:1.15rem; border-bottom:1px solid #d8d2c4; padding-bottom:.3rem; }
-    code { background:#ece7da; padding:.1em .35em; border-radius:3px; font-size:.9em; }
-    a { color:var(--sea); }
-    .status { display:inline-block; background:#e7eef3; color:var(--sea);
-              border:1px solid #b9d2e0; border-radius:999px; padding:.15rem .7rem;
-              font:600 .75rem/1.4 system-ui, sans-serif; letter-spacing:.03em; }
-    footer { max-width:760px; margin:0 auto; padding:2rem 1.5rem; color:#6b6452;
-             font-size:.85rem; border-top:1px solid #d8d2c4; }
-    #map { height:0; } /* reserved for the MapLibre demo */
+    :root { --ink:#1a2438; --paper:#f4f1ea; --line:#d8d2c4; }
+    * { box-sizing:border-box; }
+    html,body { margin:0; height:100%; font-family:Georgia,"Times New Roman",serif; color:var(--ink); }
+    #map { position:absolute; top:0; left:0; right:0; bottom:0; }
+    .wrap { position:absolute; top:0; left:0; right:0; bottom:0; }
+    /* top-left control pane (replaces the wide header) */
+    #pane { position:absolute; top:12px; left:12px; z-index:950; width:min(320px,92vw);
+            background:rgba(244,241,234,.96); border:1px solid var(--line); border-radius:8px;
+            box-shadow:0 2px 14px rgba(0,0,0,.2); padding:.55rem .65rem; font-family:system-ui,sans-serif; }
+    #pane h1 { font-family:Georgia,serif; font-size:1rem; margin:0 0 .45rem; display:flex; align-items:center; gap:.4rem; }
+    #pane .info-btn { margin-left:auto; cursor:pointer; border:1px solid var(--line); background:#fff; color:#2a6f97;
+                      border-radius:50%; width:1.45rem; height:1.45rem; font-size:.9rem; line-height:1; padding:0; }
+    #pane .info-btn:hover { background:#eaf2f7; }
+    #pane .search-wrap { position:relative; }
+    #pane #q { width:100%; font-family:Georgia,serif; font-size:.85rem; padding:.34rem .55rem;
+               border:1px solid var(--line); border-radius:4px; }
+    #pane .phon-tog { font-size:.74rem; color:#6b6452; display:flex; align-items:center; gap:.25rem; cursor:pointer;
+                      margin:.35rem 0 .1rem; white-space:nowrap; }
+    #pane .nav-row { display:flex; gap:.4rem; margin-top:.4rem; }
+    #pane select { font-family:system-ui,sans-serif; font-size:.76rem; flex:1 1 0; min-width:0; padding:.28rem .3rem;
+                   border:1px solid var(--line); border-radius:4px; background:#fff; color:var(--ink); cursor:pointer; }
+    /* info modal body */
+    .info-box { width:min(680px,94vw); height:auto; max-height:90vh; }
+    .info-body { font-family:Georgia,serif; font-size:.92rem; line-height:1.6; color:#3a3526; }
+    .info-body h3 { font-size:1rem; margin:1.3rem 0 .3rem; color:#6b4a2a; }
+    .info-body p { margin:.6rem 0; } .info-body a { color:#2a6f97; }
+    .info-body ul, .info-body ol { margin:.5rem 0 .6rem 1.15rem; padding:0; }
+    .info-body li { margin:.35rem 0; }
+    .info-body .info-lede { font-size:1.06rem; line-height:1.5; color:#2a2519; }
+    .info-body .stats { margin:.8rem 0; padding:.5rem .75rem; background:#efeadf; border-radius:6px; font-size:.86rem; }
+    .legend { position:absolute; bottom:18px; left:12px; background:rgba(244,241,234,.94);
+              border:1px solid var(--line); border-radius:6px; padding:.5rem .7rem; font-size:.74rem;
+              font-family:system-ui,sans-serif; line-height:1.7; box-shadow:0 1px 6px rgba(0,0,0,.12); }
+    .legend b { display:block; font-size:.7rem; letter-spacing:.04em; text-transform:uppercase;
+                color:#6b6452; margin-bottom:.2rem; }
+    .dot { display:inline-block; width:11px; height:11px; border-radius:50%; margin-right:.4rem;
+           vertical-align:-1px; border:1px solid rgba(0,0,0,.25); }
+    .maplibregl-popup-content { font-family:Georgia,serif; padding:.8rem .9rem; max-width:300px; border-radius:6px; }
+    .pop h3 { margin:0 0 .15rem; font-size:1.05rem; }
+    .pop .meta { font-size:.82rem; color:#5a5446; margin:0 0 .5rem; }
+    .pop dl { margin:.4rem 0 0; font-size:.82rem; }
+    .pop dt { font-weight:bold; color:#6b6452; font-size:.7rem; text-transform:uppercase; letter-spacing:.03em; margin-top:.45rem; }
+    .pop dd { margin:.05rem 0 0; }
+    .pop ul { margin:.1rem 0 0; padding-left:1.1rem; }
+    .pop .src { margin-top:.6rem; font-size:.74rem; color:#857d6c; font-style:italic; border-top:1px solid var(--line); padding-top:.4rem; }
+    .pop a { color:#2a6f97; }
+    .maplibregl-popup.tip .maplibregl-popup-content { padding:.18rem .45rem; font-size:.82rem;
+      font-family:Georgia,serif; box-shadow:0 1px 5px rgba(0,0,0,.22); }
+    .maplibregl-popup.tip .maplibregl-popup-tip { display:none; }
+    .tip-name { font-weight:bold; color:var(--ink); }
+    /* popup actions */
+    .pop-actions { margin-top:.6rem; display:flex; gap:.7rem; align-items:center; flex-wrap:wrap; }
+    .read-btn { font-family:Georgia,serif; font-size:.8rem; cursor:pointer; background:#2a6f97; color:#fff;
+                border:none; border-radius:4px; padding:.3rem .6rem; }
+    .read-btn:hover { background:#225b7c; }
+    .src-link { font-size:.78rem; color:#2a6f97; }
+    /* full-entry reader modal */
+    .modal { position:fixed; inset:0; background:rgba(26,36,56,.55); display:flex; align-items:center;
+             justify-content:center; z-index:1000; }
+    .modal[hidden] { display:none; }
+    .modal-box { width:min(880px,94vw); height:88vh; background:var(--paper); border:1px solid var(--line);
+                 border-radius:8px; box-shadow:0 8px 40px rgba(0,0,0,.4); display:flex; flex-direction:column; overflow:hidden; }
+    .modal-head { display:flex; align-items:center; gap:1rem; padding:.6rem 1rem; border-bottom:1px solid var(--line); background:#efeadf; }
+    .modal-head span { font-size:1rem; font-weight:bold; }
+    #reader-close, #info-close { margin-left:auto; border:none; background:none; font-size:1.5rem; cursor:pointer; color:#6b6452; line-height:1; padding:0 .15rem; }
+    #reader-close:hover, #info-close:hover { color:#1a2438; }
+    .reader { overflow-y:auto; padding:1rem 1.4rem; flex:1; }
+    .rvol { text-align:center; font-weight:bold; font-size:1rem; color:#6b6452; background:#efeadf;
+            border-top:2px solid #c26b4a; border-bottom:1px solid var(--line); padding:.7rem; margin:.6rem -1.4rem 1rem; }
+    .rentry { padding:.45rem .7rem; margin:.2rem 0; border-left:3px solid transparent; scroll-margin-top:1rem; }
+    .rentry.hi { background:#fbf6e7; border-left-color:#c26b4a; }
+    .rplate { margin:.8rem .7rem; text-align:center; }
+    .rplate img { max-width:min(100%,420px); max-height:300px; border:1px solid var(--line); background:#fff;
+                  cursor:zoom-in; box-shadow:0 1px 4px rgba(0,0,0,.15); }
+    .rplate figcaption { font-size:.78rem; color:#6b6452; font-style:italic; margin-top:.2rem; }
+    #lightbox { position:fixed; inset:0; z-index:9999; display:none; background:rgba(0,0,0,.92); overflow:hidden; cursor:zoom-out; }
+    #lightbox.on { display:block; }
+    #lightbox img { position:absolute; top:0; left:0; transform-origin:0 0; max-width:none; max-height:none;
+                    box-shadow:0 0 30px rgba(0,0,0,.6); cursor:grab; user-select:none; -webkit-user-drag:none; }
+    #lightbox.dragging img { cursor:grabbing; }
+    #lightbox .lb-close { position:absolute; top:8px; right:16px; z-index:2; background:none; border:none;
+                          color:#ddd; font-size:1.7rem; line-height:1; cursor:pointer; }
+    #lightbox .lb-rot { position:absolute; top:10px; right:52px; z-index:2; background:none; border:none;
+                        color:#ddd; font-size:1.5rem; line-height:1; cursor:pointer; }
+    #lightbox .lb-report { position:absolute; top:12px; left:16px; z-index:2; background:rgba(255,255,255,.12);
+                           color:#eee; border:1px solid #888; border-radius:5px; padding:4px 9px;
+                           font:12px system-ui,sans-serif; cursor:pointer; }
+    #lightbox .lb-report:hover:not(:disabled) { background:rgba(255,255,255,.22); }
+    #lightbox .lb-report:disabled { opacity:.4; cursor:default; }
+    #lightbox .lb-reports { position:absolute; top:48px; left:16px; z-index:2; max-width:340px;
+                            color:#eee; font:12px system-ui,sans-serif; text-shadow:0 1px 2px #000; }
+    #lightbox .lb-reports b { display:block; color:#f0b48a; margin-bottom:2px; font-weight:600; }
+    #lightbox .lb-reports a { color:#9cc7e0; text-decoration:none; margin-right:10px; }
+    #lightbox .lb-reports a:hover { text-decoration:underline; }
+    .pop .nomatch { color:#9a6b4a; }
+    .pop .pflag { margin:.3rem 0 0; color:#b45309; font-size:.8rem; }
+    #lightbox .lb-hint { position:absolute; bottom:10px; left:0; right:0; text-align:center; pointer-events:none;
+                         color:#aaa; font:12px system-ui,sans-serif; text-shadow:0 1px 2px #000; }
+    .rhw { margin:0 0 .25rem; font-size:.95rem; letter-spacing:.02em; }
+    .rhw .rp { font-weight:normal; font-size:.72rem; color:#857d6c; font-style:italic; margin-left:.4rem; }
+    .rtext { font-size:.9rem; line-height:1.5; color:#2a2f3a; white-space:pre-wrap; }
+    .rtext.rxref { color:#6b6452; font-style:italic; }
+    .rtable { border-collapse:collapse; margin:.6rem 0; font-size:.8rem; font-family:system-ui,sans-serif; }
+    .rtable caption { text-align:left; font-style:italic; color:#6b6452; padding:.2rem 0; }
+    .rtable th, .rtable td { border:1px solid var(--line); padding:.15rem .4rem; text-align:right; }
+    .rtable th { background:#efeadf; text-align:center; }
+    .rtable th.blank { background:transparent; border:none; }
+    .rtable .unit { font-weight:normal; color:#857d6c; }
+    .rnote { font-size:.72rem; color:#857d6c; font-style:italic; margin-top:.1rem; }
+    #sentinel-top, #sentinel-bottom { height:1px; }
+    .rmiss { background:#fff3cd; border:1px solid #ffe69c; color:#7a5b00; padding:.4rem .7rem; margin:.3rem 0;
+             border-radius:4px; font-family:system-ui,sans-serif; font-size:.78rem; }
+    /* search */
+    #results { position:absolute; top:calc(100% + 4px); left:0; width:min(460px,86vw); max-height:68vh; overflow-y:auto;
+               background:#fff; border:1px solid var(--line); border-radius:6px; box-shadow:0 6px 24px rgba(0,0,0,.28);
+               z-index:960; font-family:system-ui,sans-serif; }
+    #results[hidden] { display:none; }
+    .rs-status { padding:.6rem .8rem; color:#6b6452; font-size:.82rem; }
+    .rs-sec { padding:.35rem .8rem; font-size:.66rem; text-transform:uppercase; letter-spacing:.05em; color:#857d6c;
+              background:#f4f1ea; border-bottom:1px solid var(--line); position:sticky; top:0; }
+    .rs-row { display:block; width:100%; text-align:left; border:none; background:none; cursor:pointer;
+              padding:.4rem .8rem; border-bottom:1px solid #eee; font-family:inherit; }
+    .rs-row:hover { background:#fbf6e7; }
+    .rs-hw { font-weight:bold; color:var(--ink); font-size:.86rem; }
+    .rs-loc { color:#857d6c; font-size:.72rem; margin-left:.4rem; }
+    .rs-sn { color:#5a5446; font-size:.78rem; margin-top:.15rem; line-height:1.4; }
+    .rs-sn b { background:#ffe9a8; }
+    .geo-yes { color:#2a6f97; } .geo-no { color:#c2bbab; }
+    .rgeo { font-family:system-ui,sans-serif; font-size:.7rem; cursor:pointer; background:#eaf2f7; color:#2a6f97;
+            border:1px solid #cfe0ea; border-radius:4px; padding:.05rem .4rem; vertical-align:middle; }
+    .rgeo:hover { background:#d8e8f1; }
+    .rnogeo { font-family:system-ui,sans-serif; font-size:.7rem; color:#a99e8a; font-style:italic; }
+    .report-link { font-family:system-ui,sans-serif; font-size:.72rem; color:#9a6b4a; text-decoration:none; }
+    .report-link:hover { text-decoration:underline; }
+    .pop-reports { margin-top:.6rem; border-top:1px solid var(--line); padding-top:.4rem; font-family:system-ui,sans-serif; font-size:.76rem; }
+    .pop-reports b { display:block; color:#9a6b4a; margin-bottom:.2rem; }
+    .pop-reports a { display:block; color:#2a6f97; text-decoration:none; margin:.1rem 0; }
+    .pop-reports a:hover { text-decoration:underline; }
+    .rrep { font-family:system-ui,sans-serif; font-size:.7rem; cursor:pointer; background:#9a6b4a; color:#fff;
+            border:none; border-radius:4px; padding:.05rem .4rem; vertical-align:middle; }
+    .rrep:hover { background:#7e573b; }
   </style>
 </head>
 <body>
-  <header>
-    <p class="status">work in progress</p>
-    <h1>A Gazetteer of the World → Linked Data</h1>
-    <p class="sub">Transforming a 19th-century gazetteer into a structured authority
-      gazetteer for the World Historical Gazetteer.</p>
-  </header>
-  <main>
-    <p>This project parses the OCR'd transcripts of the Royal Geographical Society's
-      <a href="https://archive.org/details/agazetteerworld00unkngoog"><em>A Gazetteer
-      of the World</em></a> (A.&nbsp;Fullarton &amp; Co., 1856) into structured, AAT-typed place
-      records, geolocated against the
-      <a href="https://whgazetteer.org/">World Historical Gazetteer</a> via its
-      Reconciliation API.</p>
+  <div id="pane">
+    <h1>Gazetteer of the World (1856)
+      <button id="info-btn" class="info-btn" title="About this project &amp; source">ⓘ</button></h1>
+    <div class="search-wrap">
+      <input id="q" type="search" placeholder="Search names + full text…" autocomplete="off" />
+      <div id="results" hidden></div>
+    </div>
+    <label class="phon-tog" title="Phonetic / cross-script name matching (Symphonym) — loads a model on first use"><input type="checkbox" id="phon" /> phonetic / cross-script</label>
+    <div class="nav-row">
+      <select id="nav-vol" title="Open the reader at a volume"><option value="">📖 Read volume…</option></select>
+      <select id="nav-letter" title="Jump to a letter within the chosen volume"><option value="">A–Z…</option></select>
+    </div>
+    <div class="nav-row">
+      <select id="nav-plates" title="Browse the identified plates, maps &amp; portraits"><option value="">🖼️ Plates &amp; maps…</option></select>
+    </div>
+    <div class="nav-row">
+      <select id="nav-cert" title="Show map locations whose WHG match is at least this certain — cumulative (each level includes the more-certain ones). Filters the individual markers; zoom in past the heatmap.">
+        <option value="5">📍 All locations</option>
+        <option value="3">🟠 At least possible (phonetic regional)</option>
+        <option value="2">🟡 At least probable (phonetic in region)</option>
+        <option value="1">🟢 Certain only (exact + containment)</option>
+      </select>
+    </div>
+  </div>
+  <div class="wrap"><div id="map"></div>
+    <div class="legend" id="legend"><b>Feature type</b></div>
+  </div>
 
-    <h2>Explore the map</h2>
-    <p><strong><a href="map.html">Open the interactive map →</a></strong><br>
-      A sample of places extracted by an LLM (Gemini&nbsp;2.5&nbsp;Flash) and geolocated through the
-      WHG Reconciliation API. Markers carry rich popups — feature type, containing region, population,
-      notes, source page, and the reconciliation match.</p>
+  <div class="modal" id="modal" hidden>
+    <div class="modal-box">
+      <div class="modal-head"><span id="reader-title"></span><button id="reader-close" title="Close (Esc)">✕</button></div>
+      <div class="reader" id="reader-scroll">
+        <div id="sentinel-top"></div>
+        <div id="reader-content"></div>
+        <div id="sentinel-bottom"></div>
+      </div>
+    </div>
+  </div>
 
-    <h2>Pipeline status</h2>
-    <ul>
-      <li>✓ HTML parsed to a structured store (entries, cross-refs, tables, page provenance)</li>
-      <li>✓ Toponyms normalised from UPPERCASE to title case</li>
-      <li>✓ Getty AAT feature-type shortlist drafted and validated</li>
-      <li>✓ LLM extraction of places + disambiguation context (Claude &amp; Gemini, cached)</li>
-      <li>✓ WHG reconciliation → coordinates, shown on the map</li>
-      <li>… table recovery and map-image extraction from the page scans</li>
-    </ul>
+  <div class="modal" id="info-modal" hidden>
+    <div class="modal-box info-box">
+      <div class="modal-head"><span>About this project</span><button id="info-close" title="Close (Esc)" aria-label="Close">✕</button></div>
+      <div class="reader info-body">
+        <p class="info-lede">👋 Welcome! This is an interactive map and reader of <b>A Gazetteer of
+        the World</b> — a seven-volume reference book published by the Royal Geographical Society in <b>1856</b>,
+        describing tens of thousands of places across the globe as they were known in the mid-19th century. The work named no author; its anonymous editor is now identified as <a href="https://en.wikipedia.org/wiki/George_Godfrey_Cunningham" target="_blank" rel="noopener">George Godfrey Cunningham</a>.</p>
+        <p>A <i>gazetteer</i> is a geographical dictionary: an alphabetical list of places, each with a short
+        description — where it is, what kind of place it is, its population, nearby features, and so on. We have
+        turned the original printed pages into data you can <b>search, map, and read</b>.</p>
+        <h3>What you can do here</h3>
+        <ul>
+          <li><b>Explore the map</b> — every marker is a place from the gazetteer, shown where we think it is today.</li>
+          <li><b>Search</b> — type a place name; old spellings and typos are tolerated.</li>
+          <li><b>Read</b> — open a volume and read the original entries, with the historical plates (engravings and maps) shown in place.</li>
+          <li><b>Check the source</b> — every entry links to the scanned page it came from.</li>
+        </ul>
+        <h3>How it was made</h3>
+        <p>Nobody typed this in by hand — every step is automatic, and uses freely-available AI models run on
+        our own computers (no per-use fees, nothing sent to outside services):</p>
+        <ol>
+          <li><b>Reading the pages.</b> We start from public-domain photographic scans of the book and turn the
+          printed words back into text with <b>OCR</b> (“optical character recognition”), using the layout-aware
+          <a href="https://github.com/datalab-to/surya" target="_blank" rel="noopener">Surya</a> model.</li>
+          <li><b>Understanding each entry.</b> A <b>large language model</b> (“LLM” — the kind of AI behind
+          chatbots) reads each entry and pulls out structured facts: the place name, the type of place, its
+          country, coordinates, population, and so on. We use the open
+          <a href="https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct" target="_blank" rel="noopener">Llama&nbsp;3.3</a>,
+          with <a href="https://github.com/openai/gpt-oss" target="_blank" rel="noopener">gpt-oss</a> double-checking
+          its work and <a href="https://github.com/QwenLM/Qwen3" target="_blank" rel="noopener">Qwen3</a> repairing
+          the cases it flags.</li>
+          <li><b>Reading the tables and pictures.</b> The statistical tables and the engraved plates (town views
+          and maps) are read by a <i>vision</i> model,
+          <a href="https://github.com/QwenLM/Qwen2.5-VL" target="_blank" rel="noopener">Qwen2.5-VL</a>.</li>
+          <li><b>Linking to a global index.</b> We then try to match each place to the
+          <a href="https://whgazetteer.org" target="_blank" rel="noopener"><b>World Historical Gazetteer</b></a>
+          (WHG) — a free academic project that gathers historical places from many sources into one searchable
+          index. A match gives the 1856 place a modern location, and sometimes a boundary outline. (This matching
+          step is called <b>reconciliation</b>.)</li>
+        </ol>
+        <p>Each place is also given a <b>feature type</b> (city, river, mountain, ruin…) chosen from the Getty
+        <a href="https://www.getty.edu/research/tools/vocabularies/aat/" target="_blank" rel="noopener">Art &amp;
+        Architecture Thesaurus</a> (AAT), a shared published vocabulary in which every term has a stable web
+        address. Using such shared identifiers instead of free-text labels is what lets this data be <b>linked</b>
+        to other datasets — the idea behind <i>Linked Open Data</i> — rather than sitting in an isolated silo.</p>
+        <p>All of this is <b>very much a work in progress</b>. The typing and fact-extraction are only as good as
+        the instructions given to the language model, and can be improved simply by refining that prompt and
+        re-running the extraction.</p>
+        <p class="stats"><b>Over 116,000 places</b>, most linked to a modern location, plus <b>1,774 statistical
+        tables</b> and <b>133 historical plates</b> — all in a site that runs entirely in your browser, with no
+        server doing the work as you click.</p>
+        <h3>⚠️ How much to trust this</h3>
+        <p>Please treat this as a <b>research demonstrator, not an authority</b>. Because every step is automatic:</p>
+        <ul>
+          <li><b>Many matches are wrong.</b> An 1856 name may be linked to a same-named place somewhere else, or
+          to nothing at all. Matching historical names automatically is genuinely hard, and never wholly perfect — but it is an active focus of the WHG, and it steadily improves as more place data is folded into its indices.</li>
+          <li><b>Locations can be off</b>, and some places are shown only by their printed coordinates, with no match found.</li>
+          <li><b>Tables and illustrations</b> are detected unevenly — some are missed or mis-read.</li>
+        </ul>
+        <p>So take everything here as a <b>suggestion to check against the original scanned page</b> (linked from
+        every record), not as fact. Spotted an error? The <b>⚑ Report</b> link in any place popup or reader
+        entry takes a few seconds and genuinely helps improve the data.</p>
+        <h3>Source &amp; credits</h3>
+        <p>The original book is public domain (page scans via HathiTrust). The project grew out of Humphrey
+        Southall’s offer of his transcripts to the <b>WHG</b> and the discussion that followed, though it uses
+        its own fresh OCR rather than those transcripts. The heavy computation ran on the HTC and H2P clusters at
+        the <b>University of Pittsburgh Center for Research Computing and Data</b> (RRID:SCR_022735), supported by
+        NIH award S10OD028483 and NSF award OAC-2117681. The code and full method are
+        <a href="https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world" target="_blank" rel="noopener">on GitHub</a>.</p>
+      </div>
+    </div>
+  </div>
 
-    <p>Worked example —
-      <a href="https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world/blob/main/docs/model-comparison.md">cost vs quality of
-      extraction models</a> (Claude Haiku vs Gemini Flash / Flash-Lite): an evidence base for choosing
-      an LLM for a historical-PDF → linked-data pipeline.</p>
-    <p>Source code and method: <a href="https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world">github.com/WorldHistoricalGazetteer/gazetteer-of-the-world</a>.</p>
-  </main>
-  <footer>
-    Source work by the <strong>Royal Geographical Society</strong> (published anonymously, 1856).
-    OCR transcription overseen by Prof.&nbsp;Humphrey Southall (University of Portsmouth; GB
-    Historical GIS). Reconciliation indices courtesy of the World Historical Gazetteer (University
-    of Pittsburgh).
-  </footer>
+  <script>
+  const COLORS = { P:"#c26b4a", A:"#4a6fa5", H:"#2e8b8b", T:"#8a6d3b", S:"#7a4a6b", X:"#777" };
+  const LABELS = { P:"Populated place", A:"Administrative", H:"Water body", T:"Landform", S:"Structure", X:"People" };
+
+  // Light editorial basemap (CARTO Positron raster + OSM data).
+  const style = {
+    version: 8,
+    sources: { carto: {
+      type: "raster", tileSize: 256,
+      tiles: ["https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+              "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"],
+      attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+    }},
+    layers: [{ id: "carto", type: "raster", source: "carto" }]
+  };
+  const map = new maplibregl.Map({ container: "map", style, center: [10, 35], zoom: 1.6 });
+  map.addControl(new maplibregl.NavigationControl(), "top-right");
+
+  function whgLink(id) {
+    if (!id) return "";
+    const m = id.match(/^place:(?:(wd|gn|tgn):)?(.+)$/);
+    if (!m) return id;
+    const [, ns, ref] = m;
+    const url = ns === "wd" ? `https://www.wikidata.org/wiki/${ref}`
+              : ns === "gn" ? `https://www.geonames.org/${ref}`
+              : ns === "tgn" ? `https://vocab.getty.edu/tgn/${ref}`
+              : /^\d+$/.test(ref) ? `https://whgazetteer.org/places/${ref}/portal` : null;
+    return url ? `<a href="${url}" target="_blank" rel="noopener">${id}</a>` : id;
+  }
+  const esc = s => (s||"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+  // Pre-filled GitHub "New issue" link (Issue Form template) — anyone with a GitHub account can file a
+  // data-error report; the template auto-labels it `explorer-report` and a labeler workflow adds the
+  // error-type labels. `meta` is a machine-readable block for a coding agent to cluster systemic issues.
+  function reportUrl(eid, headword, volLabel, page) {
+    const loc = `${volLabel || ""}${page ? `, p.${page}` : ""}`.replace(/^, /, "").trim();
+    const qs = new URLSearchParams({
+      template: "explorer-report.yml",
+      title: `[report] ${headword || "entry"}${loc ? " — " + loc : ""}`,
+      headword: headword || "", location: loc, eid: String(eid ?? ""),
+      link: eid != null ? `${location.origin}${location.pathname}?entry=${eid}` : "",   // open this entry in the explorer
+      meta: JSON.stringify({ eid: eid ?? null, vol: volLabel || null, page: page ?? null, headword: headword || null }),
+    });
+    return `https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world/issues/new?${qs.toString()}`;
+  }
+
+  // Surface existing reports in popups: fetch the repo's `explorer-report` issues ONCE (cached ~5 min, to
+  // respect GitHub's 60/hr unauthenticated limit) and index by the eid in each issue's deep link / meta.
+  let _reps = null, _repsAt = 0, _platereps = null;
+  async function reportsByEid() {
+    if (_reps && Date.now() - _repsAt < 300000) return _reps;
+    try {
+      const r = await fetch("https://api.github.com/repos/WorldHistoricalGazetteer/gazetteer-of-the-world/issues?labels=explorer-report&state=all&per_page=100",
+                            { headers: { Accept: "application/vnd.github+json" } });
+      if (!r.ok) throw 0;
+      const map = {}, pmap = {};
+      for (const it of await r.json()) {
+        if (it.pull_request) continue;
+        const m = (it.body || "").match(/[?&]entry=(\d+)/) || (it.body || "").match(/"eid"\s*:\s*(\d+)/);
+        if (m) (map[+m[1]] = map[+m[1]] || []).push({ number: it.number, title: it.title, state: it.state, url: it.html_url });
+        const pm = (it.title + " " + (it.body || "")).match(/v[0-9]+\/p[0-9]+\.jpg/);   // plate-orientation reports keyed by plate path
+        if (pm) (pmap[pm[0]] = pmap[pm[0]] || []).push({ number: it.number, title: it.title, state: it.state, url: it.html_url });
+      }
+      _reps = map; _platereps = pmap; _repsAt = Date.now();
+    } catch { _reps = _reps || {}; _platereps = _platereps || {}; }   // rate-limited/offline -> just show no reports
+    return _reps;
+  }
+  function reportsHTML(reps) {
+    const open = reps.filter(r => r.state === "open").length;
+    return `<div class="pop-reports"><b>⚑ ${reps.length} report${reps.length > 1 ? "s" : ""}${open ? ` · ${open} open` : ""}</b>`
+      + reps.slice(0, 5).map(r => `<a href="${r.url}" target="_blank" rel="noopener">#${r.number} ${esc(r.title)}${r.state === "closed" ? " ✓" : ""}</a>`).join("")
+      + `</div>`;
+  }
+  const repsFor = eid => (_reps && _reps[eid]) || null;   // synchronous cache lookup (reader badges)
+
+  // reconcile.py's pass label -> a human-readable match mode shown in the popup
+  const MATCH_MODE = { "1-exact-in": "exact name + containment", "2-phon-in": "phonetic + containment",
+    "3-phon-broad": "phonetic (broad)", "4-phon-cc": "phonetic + country",
+    "coord-match": "name match near printed coordinates" };
+  const FLAGS = { low_confidence: "\u26a0 low-confidence name match",
+    containment_fail: "\u24d8 printed coordinates lie outside its modern administrative region" };
+  function popupHTML(p) {
+    // MapLibre serialises array/object properties to JSON strings — parse notes back.
+    let notes = p.notes;
+    if (typeof notes === "string") { try { notes = JSON.parse(notes); } catch { notes = []; } }
+    if (!Array.isArray(notes)) notes = [];
+    let h = `<div class="pop"><h3>${esc(p.name)}</h3>`;
+    h += `<p class="meta">${esc(p.type)}${p.country ? " · " + esc(p.country) : ""}</p><dl>`;
+    if (p.admin) h += `<dt>Within</dt><dd>${esc(p.admin)}</dd>`;
+    if (p.variants) h += `<dt>Also</dt><dd>${esc(p.variants)}</dd>`;
+    if (p.population) h += `<dt>Population</dt><dd>${esc(p.population)}</dd>`;
+    if (notes.length) h += `<dt>Notes</dt><dd><ul>${notes.map(n=>`<li>${esc(n)}</li>`).join("")}</ul></dd>`;
+    h += `</dl><p class="src">Source: Vol.&nbsp;${p.vol ?? "?"}, p.&nbsp;${p.page ?? "—"}` +
+         (p.headword && p.headword !== p.name ? ` (under <em>${esc(p.headword)}</em>)` : "") +
+         `<br>${p.whg_id
+            ? `WHG match: ${p.whg_name?`<em>${esc(p.whg_name)}</em> `:""}${whgLink(p.whg_id)}${p.whg_score!=null?` · score ${p.whg_score}`:""}${p.whg_pass&&MATCH_MODE[p.whg_pass]?` · via ${MATCH_MODE[p.whg_pass]}`:""}`
+            : `<span class="nomatch">\ud83d\udccd Located by printed coordinates \u2014 no WHG match</span>`}</p>`
+         + (Array.isArray(p.flags) ? p.flags.filter(f=>FLAGS[f]).map(f=>`<p class="pflag">${FLAGS[f]}</p>`).join("") : "");
+    h += `<div class="pop-actions">`;
+    if (p.vol) h += `<button class="read-btn" data-vol="${esc(String(p.vol))}" data-page="${esc(String(p.page ?? ""))}"`
+                  + ` data-hw="${esc(p.headword || p.name || "")}"${p.eid != null ? ` data-eid="${p.eid}"` : ""}`
+                  + `${p.rc != null ? ` data-rc="${p.rc}"` : ""}>📖 Read full entry</button>`;
+    if (p.src) h += `<a class="src-link" href="${esc(p.src)}" target="_blank" rel="noopener">View source page ↗</a>`;
+    h += `<a class="report-link" href="${reportUrl(p.eid, p.headword || p.name, p.vol ? "Vol. " + p.vol : "", p.page)}" target="_blank" rel="noopener" title="Report a data error (GitHub)">⚑ Report</a>`;
+    h += `</div></div>`;
+    return h;
+  }
+
+  // ── Data source: PMTiles vector tiles ─────────────────────────────────────────
+  // Tiles are LIGHT (id/name/fclass only) so the map paints fast and scales to the whole corpus; the
+  // full popup record is fetched lazily from a sharded detail store on click. Built by
+  // process/build_tiles.sh, served statically (GitHub Pages handles the byte-range requests PMTiles needs).
+  const SRC = { url: "./places.pmtiles", layer: "places", detail: "./detail" };
+  // WHG actual line/polygon geometries for reconciled places that hold them (~3.2k: admin areas, water
+  // bodies, coasts) — a showcase of WHG's geometry holdings. Extracted from the /vast geom-store and tiled
+  // by the orchestrator (process/export_geometries.py + build_tiles.sh). Keyed by whg_id for highlighting.
+  const GEOM = { url: "./geometry.pmtiles", layer: "geometry" };
+
+  // Circles fade IN as the heatmap fades OUT (cross-fade across z5–7).
+  // A place with a population is POP_MIN…POP_MAX × the default radius (by normalised latest-year pop `pn`,
+  // sqrt-scaled in the tile). Tunable here without rebuilding tiles. zoom-interpolate must be top-level, so
+  // the population factor multiplies inside each stop.
+  const POP_MIN = 1.3, POP_MAX = 10;
+  const popFactor = ["case", ["has", "pn"], ["+", POP_MIN, ["*", POP_MAX - POP_MIN, ["get", "pn"]]], 1];
+  // Match-certainty filter: show individual markers whose cert rank <= CERT_LEVEL (cumulative). cert is baked
+  // into the tiles by export_geojson.py (1=exact+containment … 4=phonetic+country, 5=none); 5 = show all.
+  let CERT_LEVEL = 5;
+  const ptsFilter = () => ["all", ["!", ["has", "point_count"]], ["<=", ["coalesce", ["get", "cert"], 5], CERT_LEVEL]];
+  const PAINT = {
+    "circle-radius": ["interpolate", ["linear"], ["zoom"],
+      6, ["*", 2.5, popFactor],
+      10, ["*", 7, popFactor]],
+    "circle-color": ["match",["get","fclass"],
+      "P",COLORS.P,"A",COLORS.A,"H",COLORS.H,"T",COLORS.T,"S",COLORS.S,"X",COLORS.X, "#777"],
+    "circle-stroke-width": 1, "circle-stroke-color": "#fff",
+    "circle-opacity": ["interpolate",["linear"],["zoom"], 6,0, 7,.9],
+    "circle-stroke-opacity": ["interpolate",["linear"],["zoom"], 6,0, 7,.9]
+  };
+  // Density heatmap for low zooms, weighted by the cluster point_count baked in by tippecanoe
+  // (coalesce -> 1 for unclustered points). Fades out by ~z7.5 as the circles take over.
+  // tippecanoe clusters points onto an ~8px tile grid, so at low zoom a small radius leaves each
+  // cell's blob discrete -> a checkerboard. Keep the radius LARGE and FLAT at low zoom so neighbouring
+  // cells' gaussians overlap into continuous density; raise low-zoom intensity to offset the spread.
+  const HEAT = {
+    "heatmap-weight": ["interpolate",["linear"],["coalesce",["get","point_count"],1], 1,.2, 60,1],
+    "heatmap-intensity": ["interpolate",["linear"],["zoom"], 0,.9, 4,1.1, 7,1.6],
+    "heatmap-radius": ["interpolate",["linear"],["zoom"], 0,45, 2,42, 4,36, 6,32, 7,30],
+    "heatmap-opacity": ["interpolate",["linear"],["zoom"], 6,.85, 7.5,0],
+    "heatmap-color": ["interpolate",["linear"],["heatmap-density"],
+      0,"rgba(255,255,178,0)", .08,"rgba(255,237,160,.7)", .3,"#fed976", .5,"#feb24c",
+      .65,"#fd8d3c", .8,"#fc4e2a", .9,"#e31a1c", 1,"#bd0026"]
+  };
+
+  // WHG geometry layers. Faint base is a DASHED OUTLINE only (no fill — fills stack too densely where admin areas overlap),
+  // clean point/heatmap view when zoomed out and reveals real boundaries as you zoom. The SELECTED place's
+  // geometry is redrawn BOLD (solid line + light fill) in the pin's orange (set on popup open, cleared on close).
+  const GEOM_MINZOOM = 5;
+  const NO_GEOM = ["==", ["get", "whg_id"], " "];   // matches nothing -> highlight hidden until a place is selected
+  const GEOM_LINE = { "line-color": "#0369a1", "line-dasharray": [2.5, 2],
+    "line-opacity": ["interpolate",["linear"],["zoom"], 5,0, 6,.55],
+    "line-width": ["interpolate",["linear"],["zoom"], 6,.5, 10,1.4] };
+  const GEOM_HL_FILL = { "fill-color": "#c2410c", "fill-opacity": .12 };
+  const GEOM_HL_LINE = { "line-color": "#c2410c", "line-opacity": 1,
+    "line-width": ["interpolate",["linear"],["zoom"], 5,1.5, 10,3] };
+
+  // Popup detail is fetched lazily by place id from sharded JSON; shards (and whole-shard fetches) are
+  // cached, so clicking neighbouring places reuses one request. The manifest gives the shard count.
+  let _shards = null, _manifest = null;
+  const _shardCache = new Map();
+  async function shardCount() {
+    if (_manifest == null) _manifest = fetch(`${SRC.detail}/manifest.json`).then(r => r.json());
+    return (_shards ??= (await _manifest).shards);
+  }
+  async function getDetail(id) {
+    const n = await shardCount();
+    const b = ((id % n) + n) % n;
+    if (!_shardCache.has(b)) _shardCache.set(b, fetch(`${SRC.detail}/${b}.json`).then(r => r.json()));
+    return { ...(await _shardCache.get(b))[id], id };
+  }
+
+  // geocoded reconciled places: eid -> [lon, lat, placeId]. Used to route search/reader to the map vs the
+  // reader, and to badge whether a place is located. Cached; missing file -> {} (nothing geocoded yet).
+  let GEO = null, _geoP = null;
+  function geocodedMap() {
+    if (GEO) return Promise.resolve(GEO);
+    if (!_geoP) _geoP = fetch("./search/geocoded.json").then(r => r.ok ? r.json() : {}).then(g => (GEO = g)).catch(() => (GEO = {}));
+    return _geoP;
+  }
+  let placePopup = null, placeMarker = null;   // single shared popup + a pin marking the selected place
+  async function openPlacePopup(lngLat, id, name) {   // map popup for a place (map click OR search/reader)
+    if (placePopup) placePopup.remove();
+    // Always drop a pin at the selected place. Most places sit in a tippecanoe cluster (point_count) so they
+    // have NO individual circle even at max zoom — without this, selecting a place flew there but showed no
+    // marker. The pin is independent of the tile clustering and of point vs line/polygon geometry.
+    if (placeMarker) placeMarker.remove();
+    placeMarker = new maplibregl.Marker({ color: "#c2410c" }).setLngLat(lngLat).addTo(map);
+    const popup = placePopup = new maplibregl.Popup({ maxWidth: "320px" }).setLngLat(lngLat).addTo(map);
+    popup.on("close", () => { if (placeMarker) { placeMarker.remove(); placeMarker = null; } setGeomHighlight(null); });
+    popup.setHTML(`<div class="pop"><h3>${esc(name || "")}</h3><p class="meta">loading…</p></div>`);
+    let detail;
+    try { detail = await getDetail(id); }
+    catch { if (popup === placePopup) popup.setHTML(`<div class="pop"><h3>${esc(name || "")}</h3><p class="meta">detail unavailable</p></div>`); return; }
+    if (popup !== placePopup) return;
+    setGeomHighlight(detail.whg_id || null);   // bold-outline this place's WHG geometry if it has one
+    popup.setHTML(popupHTML(detail));
+    try {   // surface any existing error-reports for this entry (cached lookup, no per-popup request)
+      const reps = (await reportsByEid())[detail.eid];
+      const el = reps && reps.length && popup === placePopup && popup.getElement() && popup.getElement().querySelector(".pop");
+      if (el) el.insertAdjacentHTML("beforeend", reportsHTML(reps));
+    } catch {}
+  }
+
+  // Faint base geometry (added under the place layers so points/markers stay on top). The line layer carries
+  // no geometry-type filter: it draws polygon outlines AND the standalone LineStrings (coasts, straits).
+  function addGeomLayers() {
+    map.addLayer({ id: "geom-line", type: "line", source: "geom", "source-layer": GEOM.layer,
+      minzoom: GEOM_MINZOOM, paint: GEOM_LINE });
+  }
+  // Selected-place highlight (added ON TOP of the place layers). Filtered to nothing until a place is chosen.
+  function addGeomHighlight() {
+    map.addLayer({ id: "geom-hl-fill", type: "fill", source: "geom", "source-layer": GEOM.layer,
+      filter: NO_GEOM, paint: GEOM_HL_FILL });
+    map.addLayer({ id: "geom-hl", type: "line", source: "geom", "source-layer": GEOM.layer,
+      filter: NO_GEOM, paint: GEOM_HL_LINE });
+  }
+  function setGeomHighlight(whgId) {   // bold-outline the selected place's WHG geometry, if it has one
+    const f = whgId ? ["==", ["get", "whg_id"], whgId] : NO_GEOM;
+    for (const id of ["geom-hl-fill", "geom-hl"]) if (map.getLayer(id)) map.setFilter(id, f);
+  }
+
+  function addLayers() {
+    map.addLayer({ id: "heat", type: "heatmap", source: "places", "source-layer": SRC.layer, maxzoom: 8, paint: HEAT });
+    // Circles only for INDIVIDUAL places (cluster leaders carry point_count and feed only the heatmap),
+    // so a click always resolves to one real place; dense areas stay heatmap until you zoom in enough.
+    map.addLayer({ id: "pts", type: "circle", source: "places", "source-layer": SRC.layer,
+      minzoom: 6, filter: ptsFilter(), paint: PAINT });
+    map.on("click", "pts", e => {
+      const p = e.features[0].properties;
+      const at = e.features[0].geometry?.coordinates?.slice ? e.features[0].geometry.coordinates : e.lngLat;
+      openPlacePopup(at, p.id, p.name);
+    });
+    // Hover -> name tooltip, straight from the light tile (no fetch); click -> fetch full detail.
+    const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 8, className: "tip" });
+    map.on("mousemove", "pts", e => {
+      map.getCanvas().style.cursor = "pointer";
+      const f = e.features[0];
+      const at = f.geometry?.coordinates?.slice ? f.geometry.coordinates : e.lngLat;
+      tip.setLngLat(at).setHTML(`<span class="tip-name">${esc(f.properties.name || "")}</span>`).addTo(map);
+    });
+    map.on("mouseleave", "pts", () => { map.getCanvas().style.cursor = ""; tip.remove(); });
+  }
+
+  function fillLegend(count) {  // tiles can't be enumerated client-side -> show all classes
+    const leg = document.getElementById("legend");
+    ["P","A","H","T","S","X"].forEach(k => {
+      leg.insertAdjacentHTML("beforeend",
+        `<div><span class="dot" style="background:${COLORS[k]}"></span>${LABELS[k]}</div>`);
+    });
+    if (count != null) leg.insertAdjacentHTML("beforeend",
+      `<div style="margin-top:.35rem;color:#857d6c">${count.toLocaleString()} places</div>`);
+  }
+
+  // ── Full-entry reader modal — one continuous lazy-loaded reader across ALL volumes ──────────────
+  const alpha = s => (s || "").toUpperCase().replace(/[^A-Z]/g, "");
+  const rcache = new Map();
+  const rGet = (vtag, name) => {          // manifest or a numbered chunk; cached
+    const k = `${vtag}/${name}`;
+    if (!rcache.has(k)) rcache.set(k, fetch(`./reader/${vtag}/${name}.json`).then(r => r.json()));
+    return rcache.get(k);
+  };
+  let INDEX = null;                       // [{vol,title,chunks,count}] in reading order (v1…v7)
+  const readerIndex = async () => INDEX || (INDEX = await fetch("./reader/index.json").then(r => r.json()));
+  // global chunk address = [volumeIndex, chunkIndex]; next/prev step across volume boundaries
+  const nextAddr = (vi, ci) => ci + 1 < INDEX[vi].chunks ? [vi, ci + 1] : (vi + 1 < INDEX.length ? [vi + 1, 0] : null);
+  const prevAddr = (vi, ci) => ci > 0 ? [vi, ci - 1] : (vi > 0 ? [vi - 1, INDEX[vi - 1].chunks - 1] : null);
+  const RD = { loVi: 0, loCi: 0, hiVi: 0, hiCi: -1, loading: false };
+  const $scroll = () => document.getElementById("reader-scroll");
+  const $content = () => document.getElementById("reader-content");
+
+  async function addrHTML(vi, ci, target) {   // one chunk wrapped in .rchunk so it can be unloaded as a unit
+    const data = await rGet(INDEX[vi].vol, ci);
+    const vlabel = (INDEX[vi].title.split("—").pop() || INDEX[vi].vol).trim();   // "Vol. V" — shown per entry
+    const div = ci === 0 ? `<div class="rvol">${esc(INDEX[vi].title)}</div>` : "";
+    const body = data.map(en => entryHTML(en, target && (target.eid != null ? en.eid === target.eid
+      : (String(en.p) === String(target.page) && alpha(en.hw) === alpha(target.hw))), vlabel)).join("");
+    return `<section class="rchunk">${div}${body}</section>`;
+  }
+
+  function renderTable(t) {               // structured columns/rows -> HTML (multi-level header via group)
+    const cols = t.columns || [], groups = cols.map(c => (c && c.group) || "");
+    let h = `<table class="rtable">`;
+    if (t.title) h += `<caption>${esc(t.title)}</caption>`;
+    h += `<thead>`;
+    if (groups.some(g => g)) {
+      h += `<tr>`;
+      for (let i = 0; i < cols.length;) { const g = groups[i]; let s = 1;
+        while (i + s < cols.length && groups[i + s] === g) s++;
+        h += `<th colspan="${s}"${g ? "" : ' class="blank"'}>${esc(g)}</th>`; i += s; }
+      h += `</tr>`;
+    }
+    h += `<tr>` + cols.map(c => `<th>${esc((c && c.label) || "")}${c && c.unit ? ` <span class="unit">(${esc(c.unit)})</span>` : ""}</th>`).join("") + `</tr></thead>`;
+    h += `<tbody>` + (t.rows || []).map(r => `<tr>` + (r || []).map(x => `<td>${esc(x)}</td>`).join("") + `</tr>`).join("") + `</tbody></table>`;
+    if (t.source_note) h += `<div class="rnote">${esc(t.source_note)}</div>`;
+    (t.footnotes || []).forEach(f => h += `<div class="rnote">${esc(f)}</div>`);
+    return h;
+  }
+  function entryHTML(en, hi, vlabel) {
+    if (en.k === "plate") {         // illustration plate spliced into reading order; click -> full-screen
+      const cap = esc(en.title || ({map:"Map", city_view:"View", landscape:"Landscape"}[en.kind] || "Plate"));
+      const tag = en.kind === "map" ? "🗺️ " : "🖼️ ";
+      return `<figure class="rplate"><img src="${en.img}" loading="lazy" alt="${cap}" data-full="${en.img}">`
+           + `<figcaption>${tag}${cap}${en.p ? ` — near p.${en.p}` : ""}</figcaption></figure>`;
+    }
+    const g = GEO && GEO[en.eid];   // [lon,lat,placeId] if geocoded
+    const geo = g ? `<button class="rgeo" data-lon="${g[0]}" data-lat="${g[1]}" data-pid="${g[2]}" data-hw="${esc(en.hw)}" title="Geocoded — show on the map">📍 on map</button>`
+                  : `<span class="rnogeo" title="Not geocoded">○ not located</span>`;
+    const rep = `<a class="report-link" href="${reportUrl(en.eid, en.hw, vlabel, en.p)}" target="_blank" rel="noopener" title="Report a data error (GitHub)">⚑ report</a>`;
+    const reps = repsFor(en.eid);   // existing reports -> a clickable badge (click to expand)
+    const repBadge = reps ? `<button class="rrep" data-eid="${en.eid}" title="${reps.length} report(s) on this entry — click to view">⚑ ${reps.length}</button>` : "";
+    let h = `<article class="rentry${hi ? " hi" : ""}" data-eid="${en.eid}" data-p="${en.p ?? ""}">`;
+    h += `<h4 class="rhw">${esc(en.hw)} <span class="rp">${esc(vlabel)}${en.p ? `, p.${en.p}` : ""}</span> ${geo} ${repBadge} ${rep}</h4>`;
+    h += `<div class="rtext${en.k === "c" ? " rxref" : ""}">${esc(en.text)}</div>`;
+    (en.tables || []).forEach(t => h += renderTable(t));
+    return h + `</article>`;
+  }
+
+  const MAXCHUNKS = 7;                     // keep the DOM bounded — unload chunks that scroll far out of view
+  let ioTop, ioBot;
+  async function loadMore(dir) {          // dir +1 = append next chunk, -1 = prepend previous (across volumes)
+    if (RD.loading) return;
+    const a = dir > 0 ? nextAddr(RD.hiVi, RD.hiCi) : prevAddr(RD.loVi, RD.loCi);
+    if (!a) return;
+    RD.loading = true;
+    const sc = $scroll(), ct = $content(), html = await addrHTML(a[0], a[1]);
+    if (dir > 0) {
+      ct.insertAdjacentHTML("beforeend", html); RD.hiVi = a[0]; RD.hiCi = a[1];
+      while (ct.children.length > MAXCHUNKS) {        // unload from the top; subtract its height to hold the viewport
+        const top = ct.firstElementChild, h = top.offsetHeight; top.remove(); sc.scrollTop -= h;
+        const n = nextAddr(RD.loVi, RD.loCi); RD.loVi = n[0]; RD.loCi = n[1];
+      }
+    } else {
+      const h0 = sc.scrollHeight; ct.insertAdjacentHTML("afterbegin", html); RD.loVi = a[0]; RD.loCi = a[1];
+      sc.scrollTop += sc.scrollHeight - h0;
+      while (ct.children.length > MAXCHUNKS) {        // unload from the bottom
+        ct.lastElementChild.remove();
+        const p = prevAddr(RD.hiVi, RD.hiCi); RD.hiVi = p[0]; RD.hiCi = p[1];
+      }
+    }
+    RD.loading = false;
+  }
+  async function openReader(vol, page, hw, eid, rc) {
+    await readerIndex(); await geocodedMap(); await reportsByEid();   // GEO + reports for the per-entry badges
+    const vtag = "v" + String(vol).replace(/^v/i, "");   // detail carries "5"; reader dir is "v5"
+    const vi = Math.max(0, INDEX.findIndex(v => v.vol === vtag));
+    let ci = rc;                          // prefer the exact reader-chunk baked into the place
+    if (ci == null) { const m = await rGet(vtag, "manifest");
+      ci = (m.page_index && m.page_index[String(page)] != null) ? m.page_index[String(page)] : 0; }
+    document.getElementById("reader-title").textContent = "A Gazetteer of the World";   // fixed; volume shown per entry
+    $content().innerHTML = await addrHTML(vi, ci, { eid, page, hw });
+    RD.loVi = RD.hiVi = vi; RD.loCi = RD.hiCi = ci;
+    showModal();
+    // land on the exact entry; else the first entry on the target page; else the chunk top — and say so
+    const exact = $content().querySelector(".rentry.hi");
+    const onPage = page != null && page !== "" ? $content().querySelector(`.rentry[data-p="${String(page).replace(/[^0-9]/g, "")}"]`) : null;
+    if (!exact && (eid != null || hw)) {
+      $content().insertAdjacentHTML("afterbegin",
+        `<div class="rmiss">Couldn't locate “${esc(hw || "")}”${page ? ` (p.${page})` : ""} in the transcription — showing the nearest text.</div>`);
+    }
+    (exact || onPage || $content().firstElementChild || {}).scrollIntoView?.({ block: "start" });
+  }
+  function showModal() {
+    document.getElementById("modal").hidden = false; document.body.style.overflow = "hidden";
+    ioTop = ioTop || new IntersectionObserver(es => es[0].isIntersecting && loadMore(-1), { root: $scroll() });
+    ioBot = ioBot || new IntersectionObserver(es => es[0].isIntersecting && loadMore(1), { root: $scroll() });
+    ioTop.observe(document.getElementById("sentinel-top"));
+    ioBot.observe(document.getElementById("sentinel-bottom"));
+  }
+  function hideModal() {
+    document.getElementById("modal").hidden = true; document.body.style.overflow = "";
+    ioTop && ioTop.disconnect(); ioBot && ioBot.disconnect();
+  }
+  function locateOnMap(lon, lat, pid, name) {   // close modal, fly to the place, open its popup
+    hideModal();
+    const ll = [+lon, +lat];
+    map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 8) });
+    openPlacePopup(ll, +pid, name);
+  }
+  async function openEntry(eidStr) {            // ?entry=<eid> deep link (e.g. from an error-report issue)
+    const eid = parseInt(eidStr, 10); if (!Number.isFinite(eid)) return;
+    await geocodedMap();
+    let row = null;                             // locate vol/page/rc/headword from the FTS doc table (covers all entries)
+    try { const w = await searchDb(); row = (await w.db.query("SELECT vol,page,rc,headword FROM doc WHERE eid=?", [eid]))[0]; } catch {}
+    const g = GEO[eid];
+    if (g) { const ll = [g[0], g[1]]; map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 8) }); openPlacePopup(ll, g[2], row && row.headword); }
+    else if (row) openReader(row.vol, row.page, row.headword, eid, row.rc);
+  }
+  // Zoomable full-screen plate viewer: scroll to zoom (about the cursor), drag to pan, double-click to reset.
+  const LB = { s: 1, tx: 0, ty: 0, nw: 0, nh: 0, rot: 0, drag: null, src: null };
+  const lbImg = () => document.getElementById("lightbox").querySelector("img");
+  function lbApply() { lbImg().style.transform = `translate(${LB.tx}px,${LB.ty}px) scale(${LB.s}) rotate(${LB.rot}deg)`; }
+  function lbDims() {                       // rotated bounding box + its min corner (transform-origin 0 0)
+    const w = LB.nw, h = LB.nh, r = ((LB.rot % 360) + 360) % 360;
+    if (r === 90)  return { dw: h, dh: w, minx: -h, miny: 0 };
+    if (r === 180) return { dw: w, dh: h, minx: -w, miny: -h };
+    if (r === 270) return { dw: h, dh: w, minx: 0,  miny: -w };
+    return { dw: w, dh: h, minx: 0, miny: 0 };
+  }
+  function lbFit() {                        // scale the (possibly rotated) image to fit the viewport, centred
+    const vw = innerWidth, vh = innerHeight, d = lbDims();
+    LB.s = Math.min(vw / d.dw, vh / d.dh, 1) * 0.96 || 1;
+    LB.tx = (vw - d.dw * LB.s) / 2 - LB.s * d.minx;
+    LB.ty = (vh - d.dh * LB.s) / 2 - LB.s * d.miny;
+    lbApply();
+  }
+  function reportOrientation() {            // open a prefilled GitHub issue with the rotation the user applied
+    const src = LB.src || "", deg = ((LB.rot % 360) + 360) % 360;
+    const rel = src.split("/").slice(-2).join("/") || src;   // e.g. v2/p00140.jpg
+    const qs = new URLSearchParams({
+      labels: "explorer-report",              // so the report enters the agent issue-handling workflow
+      title: `[plate orientation] ${rel}${deg ? ` — rotate ${deg}\u00b0 CW` : " — already correct"}`,
+      body: [`**Plate:** \`${src}\``, ``,
+        deg ? `This plate needs rotating **${deg}\u00b0 clockwise** to be upright (the auto-orientation pass got it wrong).`
+            : `This plate appears to be **already correctly oriented**.`,
+        ``, `_Reported from the explorer lightbox._`].join("\n"),
+    });
+    window.open(`https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world/issues/new?${qs.toString()}`,
+      "_blank", "noopener");
+  }
+  function lbSyncReport() {                  // the orientation report is meaningful only once rotated from original
+    const b = document.querySelector("#lightbox .lb-report");
+    if (b) b.disabled = (((LB.rot % 360) + 360) % 360) === 0;
+  }
+  function lbRotate() { LB.rot = (LB.rot + 90) % 360; lbFit(); lbSyncReport(); }
+  function lbWire(lb) {
+    lb.addEventListener("wheel", e => {     // zoom about the cursor (keep the point under it fixed)
+      e.preventDefault();
+      const ns = Math.min(Math.max(LB.s * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 0.05), 16);
+      LB.tx = e.clientX - (e.clientX - LB.tx) * (ns / LB.s);
+      LB.ty = e.clientY - (e.clientY - LB.ty) * (ns / LB.s);
+      LB.s = ns; lbApply();
+    }, { passive: false });
+    lb.querySelector("img").addEventListener("mousedown", e => {   // drag to pan
+      e.preventDefault(); LB.drag = [e.clientX - LB.tx, e.clientY - LB.ty]; lb.classList.add("dragging");
+    });
+    window.addEventListener("mousemove", e => { if (!LB.drag) return; LB.tx = e.clientX - LB.drag[0]; LB.ty = e.clientY - LB.drag[1]; lbApply(); });
+    window.addEventListener("mouseup", () => { LB.drag = null; lb.classList.remove("dragging"); });
+    lb.querySelector("img").addEventListener("dblclick", e => { e.preventDefault(); lbFit(); });
+    lb.querySelector(".lb-close").addEventListener("click", () => lb.classList.remove("on"));
+    lb.querySelector(".lb-rot").addEventListener("click", lbRotate);
+    lb.querySelector(".lb-report").addEventListener("click", reportOrientation);
+    lb.addEventListener("mousedown", e => { if (e.target === lb) lb.classList.remove("on"); });   // backdrop closes
+  }
+  async function renderPlateReports(src) {     // surface existing orientation reports for this plate
+    const lb = document.getElementById("lightbox"), box = lb && lb.querySelector(".lb-reports");
+    if (!box) return;
+    box.innerHTML = "";
+    await reportsByEid();                        // also fills _platereps (keyed by plate path)
+    const rel = (src || "").split("/").slice(-2).join("/");
+    const reps = _platereps && _platereps[rel];
+    if (!reps || !reps.length || LB.src !== src) return;   // bail if the user already moved to another plate
+    const open = reps.filter(r => r.state === "open").length;
+    box.innerHTML = `<b>\u2691 ${reps.length} orientation report${reps.length > 1 ? "s" : ""}${open ? ` \u00b7 ${open} open` : ""}</b>`
+      + reps.slice(0, 5).map(r => `<a href="${r.url}" target="_blank" rel="noopener">#${r.number}${r.state === "closed" ? " \u2713" : ""}</a>`).join("");
+  }
+  function showLightbox(src) {
+    let lb = document.getElementById("lightbox");
+    if (!lb) {
+      lb = document.createElement("div"); lb.id = "lightbox";
+      lb.innerHTML = '<button class="lb-close" title="Close (Esc)">✕</button>'
+        + '<button class="lb-rot" title="Rotate 90° (R)">↻</button>'
+        + '<button class="lb-report" disabled title="Rotate the plate to its correct orientation first, then report it (opens a GitHub issue with the rotation applied)">⚑ orientation</button>'
+        + '<div class="lb-reports"></div>'
+        + '<img alt="plate">'
+        + '<div class="lb-hint">scroll to zoom · drag to pan · ↻ rotate · double-click to reset · Esc to close</div>';
+      document.body.appendChild(lb); lbWire(lb);
+    }
+    const img = lb.querySelector("img");
+    LB.rot = 0; LB.src = src;                 // each plate opens unrotated; track src for the orientation report
+    lbSyncReport(); renderPlateReports(src);
+    img.onload = () => { LB.nw = img.naturalWidth || 1; LB.nh = img.naturalHeight || 1; lbFit(); };
+    img.src = src; lb.classList.add("on");
+  }
+  document.addEventListener("keydown", e => {
+    const lb = document.getElementById("lightbox");
+    if (!lb || !lb.classList.contains("on")) return;
+    if (e.key === "Escape") lb.classList.remove("on");
+    else if (e.key === "r" || e.key === "R") lbRotate();
+  });
+  document.addEventListener("click", e => {
+    const pimg = e.target.closest(".rplate img");             // click a plate -> zoomable full-screen viewer
+    if (pimg) { showLightbox(pimg.dataset.full || pimg.src); return; }
+    const rr = e.target.closest(".rrep");   // toggle the inline reports panel for a reader entry
+    if (rr) {
+      const art = rr.closest(".rentry"); if (!art) return;
+      const open = art.querySelector(".pop-reports");
+      if (open) { open.remove(); return; }
+      const reps = repsFor(+rr.dataset.eid);
+      if (reps) art.insertAdjacentHTML("beforeend", reportsHTML(reps));
+      return;
+    }
+    const g = e.target.closest(".rgeo");
+    if (g) return locateOnMap(g.dataset.lon, g.dataset.lat, g.dataset.pid, g.dataset.hw);
+    const b = e.target.closest(".read-btn");
+    if (b) return openReader(b.dataset.vol, b.dataset.page, b.dataset.hw,
+                             b.dataset.eid != null ? +b.dataset.eid : null,
+                             b.dataset.rc != null ? +b.dataset.rc : null);
+    if (e.target.id === "modal" || e.target.id === "reader-close") hideModal();
+  });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") hideModal(); });
+
+  map.on("load", async () => {
+    const protocol = new pmtiles.Protocol();
+    maplibregl.addProtocol("pmtiles", protocol.tile);
+    const pm = new pmtiles.PMTiles(SRC.url);
+    protocol.add(pm);
+    map.addSource("places", { type: "vector", url: "pmtiles://" + SRC.url });
+    const gpm = new pmtiles.PMTiles(GEOM.url);   // WHG line/polygon geometries (separate tileset)
+    protocol.add(gpm);
+    map.addSource("geom", { type: "vector", url: "pmtiles://" + GEOM.url });
+    addGeomLayers();        // faint base, UNDER the places
+    addLayers();            // heat + circles
+    addGeomHighlight();     // selected-place outline, ON TOP
+    const h = await pm.getHeader();          // tile bounds -> fit
+    map.fitBounds([[h.minLon, h.minLat], [h.maxLon, h.maxLat]], { padding: 60, maxZoom: 6 });
+    let count = null;
+    try { count = (await pm.getMetadata())?.tilestats?.layers?.[0]?.count ?? null; } catch {}
+    fillLegend(count);
+    const ent = new URLSearchParams(location.search).get("entry");   // deep link from a report/share
+    if (ent) openEntry(ent);
+  });
+
+  // ── Search: SQLite FTS5 over HTTP range requests (no server) — fuzzy names + full text ──────────
+  // Lazily spins up the sql.js-httpvfs worker on first query; the .sqlite is read by byte-range, so
+  // nothing downloads up front. Two indexes: a trigram headword index queried as overlapping 3-grams
+  // (typo/OCR-tolerant fuzzy place-name match) + a unicode61 full-text index (ranked, with snippets).
+  const trigrams = s => { s = (s || "").toLowerCase().replace(/[^a-z0-9]+/g, ""); const o = []; for (let i = 0; i + 3 <= s.length; i++) o.push(s.slice(i, i + 3)); return o; };
+  let DBW = null, searching = false;
+  const $res = () => document.getElementById("results");
+  const rstatus = t => { const r = $res(); r.innerHTML = `<div class="rs-status">${esc(t)}</div>`; r.hidden = false; };
+  async function searchDb() {
+    if (!DBW) {
+      rstatus("loading search index…");
+      // ABSOLUTE urls: relative ones would resolve inside the worker (base = the worker's own dir) and double the path
+      const abs = p => new URL(p, location.href).toString();
+      DBW = await createDbWorker(
+        // NB .png extension: GitHub Pages gzips .sqlite (breaking byte-range reads), but never images
+        [{ from: "inline", config: { serverMode: "full", url: abs("./search/gotw-fts.sqlite.png"), requestChunkSize: 4096 } }],
+        abs("./search/lib/sqlite.worker.js"), abs("./search/lib/sql-wasm.wasm"));
+    }
+    return DBW;
+  }
+  const ftsExpr = q => { const t = q.match(/[\p{L}\p{N}]+/gu) || []; return t.length ? t.map((w, i) => i === t.length - 1 ? `"${w}"*` : `"${w}"`).join(" AND ") : null; };
+  const fuzzyExpr = q => { const g = trigrams(q); return g.length ? g.map(t => `"${t}"`).join(" OR ") : null; };
+  const unmark = s => esc(s || "").replaceAll("", "<b>").replaceAll("", "</b>");
+  function resRow(r, sn) {
+    const loc = `${String(r.vol || "").replace("v", "Vol. ")}${r.page ? `, p.${r.page}` : ""}`;
+    const g = GEO && GEO[r.eid];     // [lon,lat,placeId] if geocoded -> result opens on the map
+    const badge = g ? `<span class="geo-yes" title="Geocoded — opens on the map">📍</span>`
+                    : `<span class="geo-no" title="Not geocoded — opens the source text">○</span>`;
+    return `<button class="rs-row" data-vol="${esc(String(r.vol || ""))}" data-page="${r.page ?? ""}" data-hw="${esc(r.headword || "")}"`
+      + ` data-eid="${r.eid}" data-rc="${r.rc ?? ""}"${g ? ` data-lon="${g[0]}" data-lat="${g[1]}" data-pid="${g[2]}"` : ""}>`
+      + `${badge} <span class="rs-hw">${esc(r.headword || "")}</span> <span class="rs-loc">${esc(loc)}</span>`
+      + `${sn ? `<div class="rs-sn">${unmark(sn)}</div>` : ""}</button>`;
+  }
+  const sec = t => `<div class="rs-sec">${t}</div>`;
+
+  // ── Phonetic / cross-script mode (Symphonym v7) — onnxruntime-web encodes the query, cosine-KNN over
+  //    int8 headword embeddings. Opt-in (toggle); loads the model + embeddings (~30 MB, cached) on first use.
+  const PHON = { ready: false, loading: null, sess: null, emb: null, n: 0, dim: 128 };
+  // Unicode script ranges (port of inference.py _detect_script)
+  const _SR = [["LATIN",[[0x41,0x7A],[0xC0,0x24F],[0x1E00,0x1EFF]]],["CYRILLIC",[[0x400,0x4FF],[0x500,0x52F]]],
+    ["ARABIC",[[0x600,0x6FF],[0x750,0x77F],[0xFB50,0xFDFF],[0xFE70,0xFEFF]]],["CJK",[[0x4E00,0x9FFF],[0x3400,0x4DBF],[0x20000,0x2A6DF],[0xF900,0xFAFF]]],
+    ["HANGUL",[[0xAC00,0xD7AF],[0x1100,0x11FF],[0x3130,0x318F]]],["HIRAGANA",[[0x3041,0x3096]]],["KATAKANA",[[0x30A1,0x30FA],[0x31F0,0x31FF]]],
+    ["DEVANAGARI",[[0x900,0x97F]]],["BENGALI",[[0x980,0x9FF]]],["GUJARATI",[[0xA80,0xAFF]]],["GURMUKHI",[[0xA00,0xA7F]]],
+    ["TAMIL",[[0xB80,0xBFF]]],["TELUGU",[[0xC00,0xC7F]]],["KANNADA",[[0xC80,0xCFF]]],["MALAYALAM",[[0xD00,0xD7F]]],
+    ["THAI",[[0xE00,0xE7F]]],["GEORGIAN",[[0x10A0,0x10FF]]],["ARMENIAN",[[0x530,0x58F]]],["HEBREW",[[0x590,0x5FF],[0xFB1D,0xFB4F]]],["GREEK",[[0x370,0x3FF],[0x1F00,0x1FFF]]]];
+  function detectScript(t) {
+    const c = {};
+    for (const ch of t) { const cp = ch.codePointAt(0); let hit = "OTHER";
+      for (const [nm, rs] of _SR) { if (rs.some(([lo, hi]) => cp >= lo && cp <= hi)) { hit = nm; break; } }
+      c[hit] = (c[hit] || 0) + 1; }
+    let best = "OTHER", bn = -1; for (const k in c) if (c[k] > bn) { bn = c[k]; best = k; } return best;
+  }
+  async function loadPhon() {
+    if (PHON.ready) return; if (PHON.loading) return PHON.loading;
+    PHON.loading = (async () => {
+      // absolute URLs: a relative wasmPaths resolves inside ort's own dir and doubles the path
+      ort.env.wasm.wasmPaths = new URL("./lib/onnx/", location.href).toString();
+      ort.env.wasm.numThreads = 1;
+      const [sess, buf, meta, man, cv, lv, sv] = await Promise.all([
+        ort.InferenceSession.create(new URL("./search/symphonym.int8.onnx", location.href).toString(), { executionProviders: ["wasm"] }),
+        fetch("./search/symphonym-embeddings.i8").then(r => r.arrayBuffer()),
+        fetch("./search/symphonym-meta.json").then(r => r.json()),
+        fetch("./search/symphonym-manifest.json").then(r => r.json()),
+        fetch("./search/char_vocab.json").then(r => r.json()),
+        fetch("./search/lang_vocab.json").then(r => r.json()),
+        fetch("./search/script_vocab.json").then(r => r.json()),
+      ]);
+      PHON.sess = sess; PHON.emb = new Int8Array(buf); PHON.n = man.n; PHON.dim = man.dim;
+      PHON.meta = meta; PHON.char = cv.char_to_id || cv; PHON.lang = lv.lang_to_id || lv; PHON.script = sv.script_to_id || sv;
+      PHON.ready = true;
+    })();
+    return PHON.loading;
+  }
+  async function phonHits(query) {
+    await loadPhon();
+    const ids = [...query].map(ch => PHON.char[ch] ?? 1);          // <UNK>=1
+    const sid = PHON.script[detectScript(query)] ?? 0;
+    const lid = PHON.lang[(navigator.language || "und").split("-")[0].toLowerCase()] ?? 0;   // browser language; <UNK>=0
+    const L = ids.length || 1;
+    const T = (a, d) => new ort.Tensor("int64", BigInt64Array.from(a, v => BigInt(v)), d);
+    const out = await PHON.sess.run({
+      char_ids: T(ids.length ? ids : [1], [1, L]), script_id: T([sid], [1]), lang_id: T([lid], [1]), length: T([L], [1]) });
+    const v = out.embedding.data, emb = PHON.emb, n = PHON.n, dim = PHON.dim;
+    const K = 10, bi = Array(K).fill(-1), bs = Array(K).fill(-Infinity);
+    for (let r = 0; r < n; r++) { let s = 0; const o = r * dim;
+      for (let d = 0; d < dim; d++) s += v[d] * emb[o + d];
+      if (s > bs[K - 1]) { let j = K - 1; while (j > 0 && bs[j - 1] < s) { bs[j] = bs[j - 1]; bi[j] = bi[j - 1]; j--; } bs[j] = s; bi[j] = r; } }
+    const m = PHON.meta;   // score ≈ cosine (corpus stored int8 with scale 127)
+    return bi.map((i, k) => i < 0 ? null : { eid: m.eid[i], vol: m.vol[i], page: m.page[i], rc: m.rc[i], headword: m.hw[i], score: bs[k] / 127 }).filter(Boolean);
+  }
+  const PHON_MIN = 0.70;   // hide weak "matches" (Symphonym README: >0.75 ≈ phonetically similar)
+
+  let qTok = 0;            // supersedes stale async results (FTS + phonetic) so the DOM tracks the latest query
+  async function doSearch(q) {
+    q = q.trim(); const tok = ++qTok;
+    if (q.length < 2) { $res().hidden = true; return; }
+    const phonOn = document.getElementById("phon").checked;
+    try {
+      const w = await searchDb(); await geocodedMap(); if (tok !== qTok) return;
+      const fz = fuzzyExpr(q), ex = ftsExpr(q);
+      const names = fz ? await w.db.query("SELECT d.eid,d.vol,d.page,d.rc,d.headword FROM hw JOIN doc d ON d.eid=hw.rowid WHERE hw MATCH ? ORDER BY rank LIMIT 8", [fz]) : [];
+      const full = ex ? await w.db.query("SELECT d.eid,d.vol,d.page,d.rc,d.headword, snippet(fts,1,char(2),char(3),'…',10) AS sn FROM fts JOIN doc d ON d.eid=fts.rowid WHERE fts MATCH ? ORDER BY rank LIMIT 12", [ex]) : [];
+      if (tok !== qTok) return;
+      const seen = new Set(names.map(r => r.eid)), full2 = full.filter(r => !seen.has(r.eid));
+      let h = phonOn ? `<div class="rs-status" id="phon-pending">loading phonetic matches…</div>` : "";
+      if (names.length) h += sec("Place names (fuzzy)") + names.map(r => resRow(r, null)).join("");
+      if (full2.length) h += sec("In the full text") + full2.map(r => resRow(r, r.sn)).join("");
+      $res().innerHTML = h || `<div class="rs-status">No matches for “${esc(q)}”.</div>`;
+      $res().hidden = false;
+    } catch (e) { rstatus("search unavailable: " + ((e && e.message) || e)); return; }
+    if (phonOn) phonHits(q).then(hits => {       // async — never blocks the fast FTS results
+      if (tok !== qTok) return;                  // a newer query owns the DOM now
+      const pend = document.getElementById("phon-pending"); if (pend) pend.remove();
+      const phon = hits.filter(p => p.score >= PHON_MIN);
+      if (phon.length) $res().insertAdjacentHTML("afterbegin", sec("Phonetic / cross-script") + phon.map(r => resRow(r, null)).join(""));
+    }).catch(() => { if (tok !== qTok) return; const pend = document.getElementById("phon-pending"); if (pend) pend.remove(); });
+  }
+  (function wireSearch() {
+    const qi = document.getElementById("q"); if (!qi) return;
+    let t; qi.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => doSearch(qi.value), 220); });
+    qi.addEventListener("keydown", e => { if (e.key === "Escape") $res().hidden = true; });
+    document.getElementById("phon").addEventListener("change", () => { if (qi.value.trim().length >= 2) doSearch(qi.value); });
+    $res().addEventListener("click", e => {
+      const b = e.target.closest(".rs-row"); if (!b) return;
+      $res().hidden = true;
+      if (b.dataset.lon) {            // geocoded -> zoom the map and open its popup
+        const ll = [+b.dataset.lon, +b.dataset.lat];
+        map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 8) });
+        openPlacePopup(ll, +b.dataset.pid, b.dataset.hw);
+      } else {                        // not geocoded -> open the source text in the reader
+        openReader(b.dataset.vol, b.dataset.page, b.dataset.hw, b.dataset.eid ? +b.dataset.eid : null, b.dataset.rc !== "" ? +b.dataset.rc : null);
+      }
+    });
+    document.addEventListener("click", e => { if (!e.target.closest("#results") && e.target.id !== "q") $res().hidden = true; });
+  })();
+
+  // ── Top-left control pane: about modal · reader volume/letter jump · plates browser ──────────────
+  // jump the reader to the first entry of a letter within a volume (binary-search chunks by first headword)
+  async function jumpToLetter(letter) {           // the gazetteer is alphabetical ACROSS volumes (v1 A–B … v7 T–Z)
+    await readerIndex();
+    for (const v of INDEX) {                       // first volume, in reading order, whose section reaches the letter
+      const cl = ((await rGet(v.vol, "manifest")) || {}).chunk_letters || [];
+      let ci = cl.indexOf(letter);                 // chunk dominated by exactly this letter (skips vol VII's A–S supplement)
+      if (ci < 0) {                                // letter has no chunk of its own — only count this volume if it spans the letter
+        const k = cl.findIndex(L => L && L >= letter);
+        if (k < 0) continue;                       // whole volume is below the letter -> try the next volume
+        ci = (cl[k] > letter && k > 0) ? k - 1 : k;
+      }
+      await openReader(v.vol, null, null, null, ci);
+      const hit = [...$content().querySelectorAll(".rentry")].find(a => {   // land on the first entry of the letter
+        const h = a.querySelector(".rhw"); return h && h.firstChild && alpha(h.firstChild.textContent)[0] === letter; });
+      hit && hit.scrollIntoView({ block: "start" });
+      return;
+    }
+  }
+  (function wirePane() {
+    const $ = id => document.getElementById(id);
+    const infoModal = $("info-modal");
+    const closeInfo = () => { infoModal.hidden = true; document.body.style.overflow = ""; };
+    $("info-btn").addEventListener("click", () => { infoModal.hidden = false; document.body.style.overflow = "hidden"; });
+    infoModal.addEventListener("click", e => { if (e.target === infoModal || e.target.id === "info-close") closeInfo(); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && !infoModal.hidden) closeInfo(); });
+    try {                                  // open the intro once, on a visitor's first visit, then remember
+      if (!localStorage.getItem("gotw_info_seen")) {
+        infoModal.hidden = false; document.body.style.overflow = "hidden";
+        localStorage.setItem("gotw_info_seen", "1");
+      }
+    } catch (e) {}
+
+    const letSel = $("nav-letter");                        // A–Z options
+    for (let c = 65; c <= 90; c++) { const o = document.createElement("option"); o.value = o.textContent = String.fromCharCode(c); letSel.appendChild(o); }
+
+    readerIndex().then(idx => {                            // fill the volume select from the reader index
+      const vs = $("nav-vol");
+      idx.forEach(v => { const o = document.createElement("option"); o.value = v.vol;
+        o.textContent = (v.title.split("—").pop() || v.vol).trim(); vs.appendChild(o); });
+    }).catch(() => {});
+
+    fetch("./plates/manifest.json").then(r => r.ok ? r.json() : {}).then(m => {   // fill the plates browser
+      const ps = $("nav-plates");
+      Object.keys(m).sort().forEach(v => {
+        const arr = m[v]; if (!arr || !arr.length) return;
+        const og = document.createElement("optgroup"); og.label = "Vol. " + v.replace(/^v/, "");
+        arr.forEach(pl => { const o = document.createElement("option"); o.value = pl.img;
+          o.textContent = `${({map:"🗺️",city_view:"🏙️",landscape:"🏞️"}[pl.kind]||"🖼️")} ${pl.title || ({map:"Map",city_view:"View",landscape:"Landscape"}[pl.kind]||"Plate")}${pl.after_page != null ? " — after p." + pl.after_page : ""}`;
+          og.appendChild(o); });
+        ps.appendChild(og);
+      });
+    }).catch(() => {});
+
+    $("nav-vol").addEventListener("change", e => { const v = e.target.value; if (!v) return;
+      openReader(v, null, null, null, 0); e.target.selectedIndex = 0; });
+    letSel.addEventListener("change", e => { const L = e.target.value; if (!L) return;
+      jumpToLetter(L); e.target.selectedIndex = 0; });
+    $("nav-plates").addEventListener("change", e => { const img = e.target.value; if (!img) return;
+      showLightbox(img); e.target.selectedIndex = 0; });
+    $("nav-cert").addEventListener("change", e => { CERT_LEVEL = +e.target.value || 5;
+      if (map.getLayer("pts")) map.setFilter("pts", ptsFilter()); });
+  })();
+  </script>
 </body>
 </html>
