@@ -42,7 +42,6 @@ jobs:
           cp /tmp/assets/gotw-fts.sqlite.png docs/search/
           cp /tmp/assets/symphonym.int8.onnx /tmp/assets/symphonym-embeddings.i8 \
              /tmp/assets/symphonym-meta.json /tmp/assets/symphonym-manifest.json docs/search/
-          cp docs/map.html docs/index.html             # the map IS the landing page (single source: map.html)
           echo "assets in place:"; du -sh docs/reader docs/search/gotw-fts.sqlite.png docs/search/symphonym-embeddings.i8
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

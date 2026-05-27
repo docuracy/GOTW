@@ -207,7 +207,7 @@ embedded in the reader. Volume I alone is ~11.4k entries · ~813 cross-reference
 entries (via `—Also`), pages 3–896. The repo lives at
 [`WorldHistoricalGazetteer/gazetteer-of-the-world`](https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world);
 the live explorer is at
-[worldhistoricalgazetteer.github.io/gazetteer-of-the-world](https://worldhistoricalgazetteer.github.io/gazetteer-of-the-world/map.html).
+[worldhistoricalgazetteer.github.io/gazetteer-of-the-world](https://worldhistoricalgazetteer.github.io/gazetteer-of-the-world/).
 **The whole pipeline runs on the CRC via [`process/run_pipeline.sh`](process/run_pipeline.sh)** (staged
 Slurm submission with `--list`/`--dry-run`/`--from`/`--only`).
 
@@ -411,7 +411,7 @@ handling the offset drift (16→80) caused by ~70 unpaginated steel plates that 
   mixed in. `process/pdf_coverage.py` reports each volume's head-word range so the seven tile A–Z without
   overlap or gap. (Tables/maps recover from the 600 dpi page images directly; the searchable per-volume
   PDF built by `process/build_pdf.py` is now mainly an archival artifact, since OCR reads the images.)
-- **A static, server-less explorer** — live at [worldhistoricalgazetteer.github.io/gazetteer-of-the-world/map.html](https://worldhistoricalgazetteer.github.io/gazetteer-of-the-world/map.html).
+- **A static, server-less explorer** — live at [worldhistoricalgazetteer.github.io/gazetteer-of-the-world/](https://worldhistoricalgazetteer.github.io/gazetteer-of-the-world/).
   Everything is served from **GitHub Pages with no backend**, leaning on "fetch only what you need" formats. It
   is deployed via a **GitHub Actions Pages artifact** (`.github/workflows/pages.yml`); the large generated files
   live in a **GitHub Release** (`site-assets`, re-published by `process/publish_assets.sh`) so they're served

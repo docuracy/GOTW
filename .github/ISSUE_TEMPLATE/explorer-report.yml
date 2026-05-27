@@ -7,7 +7,7 @@ body:
     attributes:
       value: >
         Thanks for helping improve the data. This form was opened from the
-        [GOTW explorer](https://worldhistoricalgazetteer.github.io/gazetteer-of-the-world/map.html); the entry fields below are
+        [GOTW explorer](https://worldhistoricalgazetteer.github.io/gazetteer-of-the-world/); the entry fields below are
         pre-filled — please **don't edit them** — just tick the error type(s) and add a note.
         Anyone with a GitHub account can submit; curators triage these under the `explorer-report` label.
   - type: input

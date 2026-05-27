@@ -6,7 +6,7 @@
 #
 # Requires tippecanoe >= 2.17 (native PMTiles output) on PATH:
 #   https://github.com/felt/tippecanoe  (brew install tippecanoe / build from source)
-# Then flip map.html's SRC to { mode:"pmtiles", url:"./places.pmtiles", layer:"places" }.
+# Then flip index.html's SRC to { mode:"pmtiles", url:"./places.pmtiles", layer:"places" }.
 #
 #   process/build_tiles.sh                       # data/gotw_seg.sqlite -> docs/places.pmtiles
 #   DB=/path/to.sqlite OUT=docs/places.pmtiles process/build_tiles.sh
@@ -26,7 +26,7 @@ echo "1/2  export $DB -> $GEOJSONL"
 python3 process/export_geojson.py --db "$DB" --out "$GEOJSONL"
 
 echo "2/2  tippecanoe -> $OUT"
-# -l places             : single named layer (map.html references source-layer "places")
+# -l places             : single named layer (index.html references source-layer "places")
 # -z9 --cluster-maxzoom=6 : cluster ONLY up to z6 (the low-zoom density HEATMAP, weighted by point_count);
 #                         at z7+ clustering is OFF so EVERY place is an individual feature with its own id —
 #                         so zooming in always yields a visible circle/marker per place (not a heatmap blob).
@@ -38,7 +38,7 @@ tippecanoe -o "$OUT" -f -l places \
   "$GEOJSONL"
 
 echo "done -> $OUT"
-echo "(set map.html SRC to { mode:\"pmtiles\", url:\"./places.pmtiles\", layer:\"places\" } to use it)"
+echo "(set index.html SRC to { mode:\"pmtiles\", url:\"./places.pmtiles\", layer:\"places\" } to use it)"
 
 # ── WHG line/polygon geometries (showcase) — only on the CRC, where the /vast geom-store lives ──────────
 # Reconciled matches that resolve to OSM/OHM relations, Wikidata/TGN areas, etc. carry real boundaries.
@@ -49,7 +49,7 @@ echo "geometry  export $DB + $GEOM_STORE -> $GEOM_GEOJSONL"
 python3 process/export_geometries.py --db "$DB" --store "$GEOM_STORE" --out "$GEOM_GEOJSONL"
 if [ -s "$GEOM_GEOJSONL" ]; then
   echo "geometry  tippecanoe -> $GEOM_OUT"
-  # -Z3 -z10: large admin polygons visible from z3; map.html gates the FAINT layer above z5. lines = polygon
+  # -Z3 -z10: large admin polygons visible from z3; index.html gates the FAINT layer above z5. lines = polygon
   # outlines + standalone coasts/straits. --no-tile-size-limit: keep all ~3k features (never drop to fit 500KB).
   tippecanoe -o "$GEOM_OUT" -f -l geometry \
     -Z3 -z10 --simplification=10 --no-tiny-polygon-reduction --no-tile-size-limit \

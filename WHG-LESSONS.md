@@ -1,6 +1,6 @@
 # Gazetteer of the World → WHG: a demonstrator, and what it teaches us
 
-This note accompanies the GOTW demonstrator ([worldhistoricalgazetteer.github.io/gazetteer-of-the-world/map.html](https://worldhistoricalgazetteer.github.io/gazetteer-of-the-world/map.html)).
+This note accompanies the GOTW demonstrator ([worldhistoricalgazetteer.github.io/gazetteer-of-the-world/](https://worldhistoricalgazetteer.github.io/gazetteer-of-the-world/)).
 It is in three parts: **(1)** a guided tour of the UI and how the data behind it was produced, for talking
 through at the team meeting; **(2)** lessons for rebuilding the WHG dataset-explorer tool — including running
 **Symphonym embeddings client-side via ONNX** to cut server dependency; and **(3)** an honest assessment of how
