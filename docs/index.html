@@ -686,7 +686,7 @@
     const eid = parseInt(eidStr, 10); if (!Number.isFinite(eid)) return;
     await geocodedMap();
     let row = null;                             // locate vol/page/rc/headword from the FTS doc table (covers all entries)
-    try { const w = await searchDb(); row = (await w.db.query("SELECT vol,page,rc,headword FROM doc WHERE eid=?", [eid]))[0]; } catch {}
+    try { const w = await searchDb(true); row = (await w.db.query("SELECT vol,page,rc,headword FROM doc WHERE eid=?", [eid]))[0]; } catch {}
     const g = GEO[eid];
     if (g) { const ll = [g[0], g[1]]; map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 8) }); openPlacePopup(ll, g[2], row && row.headword); }
     else if (row) openReader(row.vol, row.page, row.headword, eid, row.rc);
@@ -842,9 +842,9 @@
   let DBW = null, searching = false;
   const $res = () => document.getElementById("results");
   const rstatus = t => { const r = $res(); r.innerHTML = `<div class="rs-status">${esc(t)}</div>`; r.hidden = false; };
-  async function searchDb() {
+  async function searchDb(quiet) {
     if (!DBW) {
-      rstatus("loading search index…");
+      if (!quiet) rstatus("loading search index…");
       // ABSOLUTE urls: relative ones would resolve inside the worker (base = the worker's own dir) and double the path
       const abs = p => new URL(p, location.href).toString();
       DBW = await createDbWorker(
