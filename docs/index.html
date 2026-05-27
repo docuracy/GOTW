@@ -147,6 +147,8 @@
     .rnogeo { font-family:system-ui,sans-serif; font-size:.7rem; color:#a99e8a; font-style:italic; }
     .report-link { font-family:system-ui,sans-serif; font-size:.72rem; color:#9a6b4a; text-decoration:none; }
     .report-link:hover { text-decoration:underline; }
+    .copy-link { font-family:system-ui,sans-serif; font-size:.72rem; color:#2a6f97; background:none; border:none; cursor:pointer; padding:0; }
+    .copy-link:hover { text-decoration:underline; }
     .pop-reports { margin-top:.6rem; border-top:1px solid var(--line); padding-top:.4rem; font-family:system-ui,sans-serif; font-size:.76rem; }
     .pop-reports b { display:block; color:#9a6b4a; margin-bottom:.2rem; }
     .pop-reports a { display:block; color:#2a6f97; text-decoration:none; margin:.1rem 0; }
@@ -373,6 +375,7 @@
                   + `${p.rc != null ? ` data-rc="${p.rc}"` : ""}>📖 Read full entry</button>`;
     if (p.src) h += `<a class="src-link" href="${esc(p.src)}" target="_blank" rel="noopener">View source page ↗</a>`;
     h += `<a class="report-link" href="${reportUrl(p.eid, p.headword || p.name, p.vol ? "Vol. " + p.vol : "", p.page)}" target="_blank" rel="noopener" title="Report a data error (GitHub)">⚑ Report</a>`;
+    if (p.eid != null) h += `<button class="copy-link" data-eid="${p.eid}" title="Copy a shareable link to this place">🔗 Copy link</button>`;
     h += `</div></div>`;
     return h;
   }
@@ -458,6 +461,26 @@
     return _geoP;
   }
   let placePopup = null, placeMarker = null;   // single shared popup + a pin marking the selected place
+  // ── URL-hash navigation + share links ──────────────────────────────────────
+  // The examined entry is mirrored in the URL as #entry=<eid>, so Back/Forward step through the places you've
+  // looked at and a pasted link re-opens the place (map popup if geocoded, else the reader).
+  let _navEid = null;                               // eid currently in the hash (so we ignore our own updates)
+  const shareUrl = eid => location.origin + location.pathname + "#entry=" + eid;
+  const hashEid = () => { const m = location.hash.match(/entry=(\d+)/); return m ? +m[1] : null; };
+  function navTo(eid) {                             // record an examined entry in the URL (adds a history entry)
+    if (eid == null) return;
+    eid = +eid;
+    if (eid === _navEid) return;
+    _navEid = eid;
+    location.hash = "entry=" + eid;                 // fires hashchange; handler no-ops because eid === _navEid
+  }
+  window.addEventListener("hashchange", () => {     // Back/Forward, or a pasted/edited link
+    const eid = hashEid();
+    if (eid == null || eid === _navEid) return;
+    _navEid = eid;
+    openEntry(eid);
+  });
+
   async function openPlacePopup(lngLat, id, name) {   // map popup for a place (map click OR search/reader)
     if (placePopup) placePopup.remove();
     // Always drop a pin at the selected place. Most places sit in a tippecanoe cluster (point_count) so they
@@ -473,6 +496,7 @@
     catch { if (popup === placePopup) popup.setHTML(`<div class="pop"><h3>${esc(name || "")}</h3><p class="meta">detail unavailable</p></div>`); return; }
     if (popup !== placePopup) return;
     setGeomHighlight(detail.whg_id || null);   // bold-outline this place's WHG geometry if it has one
+    if (detail.eid != null) navTo(detail.eid);  // mirror in the URL (#entry=) for Back/Forward + sharing
     popup.setHTML(popupHTML(detail));
     try {   // surface any existing error-reports for this entry (cached lookup, no per-popup request)
       const reps = (await reportsByEid())[detail.eid];
@@ -586,10 +610,11 @@
     const geo = g ? `<button class="rgeo" data-lon="${g[0]}" data-lat="${g[1]}" data-pid="${g[2]}" data-hw="${esc(en.hw)}" title="Geocoded — show on the map">📍 on map</button>`
                   : `<span class="rnogeo" title="Not geocoded">○ not located</span>`;
     const rep = `<a class="report-link" href="${reportUrl(en.eid, en.hw, vlabel, en.p)}" target="_blank" rel="noopener" title="Report a data error (GitHub)">⚑ report</a>`;
+    const cpy = `<button class="copy-link" data-eid="${en.eid}" title="Copy a shareable link to this entry">🔗</button>`;
     const reps = repsFor(en.eid);   // existing reports -> a clickable badge (click to expand)
     const repBadge = reps ? `<button class="rrep" data-eid="${en.eid}" title="${reps.length} report(s) on this entry — click to view">⚑ ${reps.length}</button>` : "";
     let h = `<article class="rentry${hi ? " hi" : ""}" data-eid="${en.eid}" data-p="${en.p ?? ""}">`;
-    h += `<h4 class="rhw">${esc(en.hw)} <span class="rp">${esc(vlabel)}${en.p ? `, p.${en.p}` : ""}</span> ${geo} ${repBadge} ${rep}</h4>`;
+    h += `<h4 class="rhw">${esc(en.hw)} <span class="rp">${esc(vlabel)}${en.p ? `, p.${en.p}` : ""}</span> ${geo} ${repBadge} ${rep} ${cpy}</h4>`;
     h += `<div class="rtext${en.k === "c" ? " rxref" : ""}">${esc(en.text)}</div>`;
     (en.tables || []).forEach(t => h += renderTable(t));
     return h + `</article>`;
@@ -630,6 +655,7 @@
     $content().innerHTML = await addrHTML(vi, ci, { eid, page, hw });
     RD.loVi = RD.hiVi = vi; RD.loCi = RD.hiCi = ci;
     showModal();
+    if (eid != null) navTo(eid);                // mirror the opened entry in the URL (#entry=)
     // land on the exact entry; else the first entry on the target page; else the chunk top — and say so
     const exact = $content().querySelector(".rentry.hi");
     const onPage = page != null && page !== "" ? $content().querySelector(`.rentry[data-p="${String(page).replace(/[^0-9]/g, "")}"]`) : null;
@@ -758,6 +784,14 @@
     else if (e.key === "r" || e.key === "R") lbRotate();
   });
   document.addEventListener("click", e => {
+    const cl = e.target.closest(".copy-link");                // copy a shareable #entry= link
+    if (cl) {
+      const url = shareUrl(cl.dataset.eid);
+      (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(
+        () => { const t = cl.textContent; cl.textContent = "✓ Copied"; setTimeout(() => { cl.textContent = t; }, 1500); },
+        () => prompt("Copy this link:", url));
+      return;
+    }
     const pimg = e.target.closest(".rplate img");             // click a plate -> zoomable full-screen viewer
     if (pimg) { showLightbox(pimg.dataset.full || pimg.src); return; }
     const rr = e.target.closest(".rrep");   // toggle the inline reports panel for a reader entry
@@ -796,8 +830,8 @@
     let count = null;
     try { count = (await pm.getMetadata())?.tilestats?.layers?.[0]?.count ?? null; } catch {}
     fillLegend(count);
-    const ent = new URLSearchParams(location.search).get("entry");   // deep link from a report/share
-    if (ent) openEntry(ent);
+    const ent = hashEid() || new URLSearchParams(location.search).get("entry");   // #entry= (share/nav) or ?entry= (reports)
+    if (ent) { _navEid = +ent; openEntry(ent); }
   });
 
   // ── Search: SQLite FTS5 over HTTP range requests (no server) — fuzzy names + full text ──────────
