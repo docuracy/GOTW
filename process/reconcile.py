@@ -43,7 +43,7 @@ Usage:
   python3 process/reconcile.py --backend api --concurrency 6       # public API (needs WHG_API_TOKEN)
 """
 from __future__ import annotations
-import argparse, json, os, re, sqlite3, sys, time
+import argparse, json, math, os, re, sqlite3, sys, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
@@ -60,12 +60,15 @@ DEFAULT_RADIUS_KM = 150
 # country-level proxy). `contain`: None | "narrow" (innermost geometry-bearing parent) | "broad" (next
 # parent out); `relation`: WHG spatial relation for contained_in. Precision first (exact, within the
 # narrowest parent), then recall (phonetic within parent → relax outward → country-only → printed coords).
+# NOTE: places that carry printed coordinates are NOT run through this name cascade — coordinates are
+# authoritative, so they go through the dedicated coord pass (run_coord_pass): best name match WITHIN a
+# radius of the printed point, else located at the coords with a `coord_only` flag. These passes handle
+# only the ~93% of places with no printed coordinates.
 PASSES = [
     ("1-exact-in",   "exact",    "narrow", "within",     False),
     ("2-phon-in",    "phonetic", "narrow", "intersects", False),
     ("3-phon-broad", "phonetic", "broad",  "intersects", False),
     ("4-phon-cc",    "phonetic", None,     None,         False),
-    ("5-coords",     "phonetic", None,     None,         True),
 ]
 
 
@@ -89,6 +92,64 @@ def _bounds(lat, lng, radius_km):
     return {"type": "Polygon", "coordinates": [[
         [lng - d, lat - d], [lng + d, lat - d], [lng + d, lat + d],
         [lng - d, lat + d], [lng - d, lat - d]]]}
+
+
+# ── coordinate-authoritative matching ─────────────────────────────────────────
+# When a place prints its own coordinates we trust them as ground truth for *location* and resolve to the
+# best NAME match WITHIN a radius of that point (bounds replaces ccodes). If several qualify we take the
+# NEAREST. If none reaches COORD_THRESHOLD we keep the place located at its printed coords with a
+# `coord_only` flag (no WHG match). A match below 90 is kept but flagged `low_confidence`.
+COORD_RADIUS_KM = float(os.environ.get("GOTW_COORD_RADIUS_KM", "50"))
+COORD_THRESHOLD = float(os.environ.get("GOTW_COORD_THRESHOLD", "70"))
+
+
+def _haversine(lat1, lng1, lat2, lng2):
+    p = math.radians
+    h = (math.sin(p(lat2 - lat1) / 2) ** 2
+         + math.cos(p(lat1)) * math.cos(p(lat2)) * math.sin(p(lng2 - lng1) / 2) ** 2)
+    return 2 * 6371.0 * math.asin(math.sqrt(h))
+
+
+def _circle_bbox(lat, lng, km):
+    """GeoJSON box enclosing the km-radius circle (lng widened by 1/cos lat so the circle isn't clipped E–W)."""
+    dlat = km / 111.0
+    dlng = km / (111.0 * max(0.15, math.cos(math.radians(lat))))
+    return {"type": "Polygon", "coordinates": [[
+        [lng - dlng, lat - dlat], [lng + dlng, lat - dlat], [lng + dlng, lat + dlat],
+        [lng - dlng, lat + dlat], [lng - dlng, lat - dlat]]]}
+
+
+def _coords_of(place):
+    ext = json.loads(place["extraction"]) if place["extraction"] else {}
+    lat, lng = ext.get("latitude"), ext.get("longitude")
+    return (lat, lng) if (lat is not None and lng is not None) else (None, None)
+
+
+def _gw_coord_match(place, radius_km=COORD_RADIUS_KM, threshold=COORD_THRESHOLD):
+    """Best within-radius name match for a coord-bearing place, or a coord_only result.
+    Returns {coord_only, coords, ...}: coord_only=False carries id/name/score/coords/dist_km/flags."""
+    lat, lng = _coords_of(place)
+    if lat is None:
+        return None
+    bbox = _circle_bbox(lat, lng, radius_km)
+    cands = []                                       # (dist_km, hit) within the true radius, name score >= threshold
+    for mode in ("exact", "phonetic"):
+        resp = _post(f"{GATEWAY_URL}/api/reconcile", {"query": place["name"], "mode": mode, "bounds": bbox, "size": 20})
+        for h in (resp.get("hits") or []):
+            geos = h.get("geometries") or []
+            rp = geos[0].get("repr_point") if geos else None
+            if not rp or h.get("score", 0) < threshold:
+                continue
+            d = _haversine(lat, lng, rp[1], rp[0])
+            if d <= radius_km:
+                cands.append((d, h))
+    if not cands:
+        return {"coord_only": True, "coords": (lat, lng)}
+    d, top = min(cands, key=lambda t: t[0])          # coords are authoritative -> nearest qualifying name match
+    rp = (top.get("geometries") or [{}])[0].get("repr_point")
+    flags = [] if top.get("score", 0) >= 90 else ["low_confidence"]
+    return {"coord_only": False, "id": top["place_id"], "name": top.get("title"),
+            "score": top.get("score"), "coords": (rp[1], rp[0]), "dist_km": round(d, 1), "flags": flags}
 
 
 def _post(url, body, tok=None, tries=4):
@@ -274,6 +335,19 @@ def run_pass_gateway(rows, pass_cfg, radius_km, threshold, concurrency, parents_
     return best
 
 
+def run_coord_pass(rows, radius_km, threshold, concurrency):
+    """Coord-authoritative pass: {place_id -> coord-match-or-coord_only result} for coord-bearing places."""
+    out = {}
+    def work(r):
+        return r["place_id"], _gw_coord_match(r, radius_km, threshold)
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        for fut in as_completed([pool.submit(work, r) for r in rows]):
+            pid, res = fut.result()
+            if res:
+                out[pid] = res
+    return out
+
+
 # ── DO public-API backend (batched /reconcile, countries, extend centroids) ──
 # No per-place hierarchy here (the W3C result carries no geometry/has_geom inline), so the containment
 # passes collapse: a "narrow" pass runs as country-only, "broad"/country-only passes are skipped as
@@ -350,12 +424,21 @@ def reconcile(con, rows, backend, threshold, radius_km, concurrency, tok=None, h
         print(f"  geometry-bearing parent chain for {len(parents_by_pid)}/{len(rows)} places; "
               f"relations for {len(relations)}; {len(_PARENT_CACHE)} distinct parents cached", flush=True)
 
-    matched = {}      # place_id -> (pass_label, candidate{id,name,score,coords})
+    # Coordinates are authoritative: coord-bearing places skip the name cascade and go through the dedicated
+    # coord pass (gateway only). The other places run the name cascade as before.
+    coord_rows, name_rows = [], []
+    if backend == "gateway":
+        for r in rows:
+            (coord_rows if _coords_of(r)[0] is not None else name_rows).append(r)
+    else:
+        name_rows = rows
+
+    matched = {}      # place_id -> (pass_label, candidate{id,name,score,coords})  — name cascade
     for cfg in PASSES:
         label, _, contain, _, _ = cfg
         if contain in ("narrow", "broad") and not use_hier:   # containment passes need the resolved parents
             continue
-        todo = [r for r in rows if r["place_id"] not in matched]
+        todo = [r for r in name_rows if r["place_id"] not in matched]
         if not todo:
             break
         got = (run_pass_gateway(todo, cfg, radius_km, threshold, concurrency, parents_by_pid)
@@ -363,7 +446,14 @@ def reconcile(con, rows, backend, threshold, radius_km, concurrency, tok=None, h
         for pid, cand in got.items():
             matched[pid] = (label, cand)
         print(f"pass {label:13} on {len(todo):>6}  -> matched {len(got):>5}  "
-              f"(cumulative {len(matched)}/{len(rows)})", flush=True)
+              f"(cumulative {len(matched)}/{len(name_rows)})", flush=True)
+
+    coord_res = {}    # place_id -> coord match / coord_only result
+    if coord_rows:
+        coord_res = run_coord_pass(coord_rows, COORD_RADIUS_KM, COORD_THRESHOLD, concurrency)
+        cm = sum(1 for v in coord_res.values() if not v["coord_only"])
+        print(f"coord pass ({COORD_RADIUS_KM:.0f}km) on {len(coord_rows):>6}  -> matched {cm:>5}, "
+              f"coord-only {len(coord_rows) - cm}", flush=True)
 
     if backend == "api":      # gateway already returned coords inline
         need = [c["id"] for _, c in matched.values() if c["coords"] is None]
@@ -376,22 +466,41 @@ def reconcile(con, rows, backend, threshold, radius_km, concurrency, tok=None, h
     for r in rows:
         pid = r["place_id"]
         rels = relations.get(pid) or []      # partOf chain recorded even when the leaf itself is unmatched
-        if pid in matched:
+        cr = coord_res.get(pid)
+        if pid in matched:                   # name-cascade match (non-coord place)
             label, cand = matched[pid]
             lat, lon = cand["coords"] or (None, None)
             con.execute("UPDATE place SET whg_match_id=?, whg_score=?, lat=?, lon=?, recon_pass=?, "
                         "reconciliation=?, status='reconciled', created_at=? WHERE place_id=?",
                         (cand["id"], cand.get("score"), lat, lon, label,
-                         json.dumps({"pass": label, "candidate": cand, "relations": rels}), now, pid))
-        else:
+                         json.dumps({"pass": label, "candidate": cand, "relations": rels, "flags": []}), now, pid))
+        elif cr and not cr["coord_only"]:    # coord-authoritative match (nearest qualifying name match in radius)
+            lat, lon = cr["coords"]
+            con.execute("UPDATE place SET whg_match_id=?, whg_score=?, lat=?, lon=?, recon_pass='coord-match', "
+                        "reconciliation=?, status='reconciled', created_at=? WHERE place_id=?",
+                        (cr["id"], cr.get("score"), lat, lon,
+                         json.dumps({"pass": "coord-match",
+                                     "candidate": {"id": cr["id"], "name": cr["name"], "score": cr["score"],
+                                                   "coords": [lat, lon], "dist_km": cr["dist_km"]},
+                                     "relations": rels, "flags": cr["flags"]}), now, pid))
+        elif cr:                             # coord-only: located at the printed point, no WHG match
+            lat, lon = cr["coords"]
+            con.execute("UPDATE place SET whg_match_id=NULL, whg_score=NULL, lat=?, lon=?, recon_pass='coord-only', "
+                        "reconciliation=?, status='unmatched', created_at=? WHERE place_id=?",
+                        (lat, lon, json.dumps({"pass": "coord-only", "coords": [lat, lon],
+                                               "relations": rels, "flags": ["coord_only"]}), now, pid))
+        else:                                # no coords and no name match
             con.execute("UPDATE place SET recon_pass='unmatched', status='unmatched', reconciliation=?, "
                         "created_at=? WHERE place_id=?",
                         (json.dumps({"relations": rels}) if rels else None, now, pid))
     con.commit()
+    cmatch = sum(1 for v in coord_res.values() if not v["coord_only"])
+    conly = len(coord_res) - cmatch
     by = lambda lbl: sum(1 for v in matched.values() if v[0] == lbl)
-    print(f"reconciled {len(matched)}/{len(rows)} via {backend} ("
+    print(f"reconciled {len(matched) + cmatch}/{len(rows)} via {backend} ("
           + ", ".join(f"{by(c[0])} {c[0]}" for c in PASSES)
-          + f"); {sum(len(v) for v in relations.values())} partOf relations")
+          + f", {cmatch} coord-match) + {conly} coord-only; "
+          + f"{sum(len(v) for v in relations.values())} partOf relations")
 
 
 DEMO = [

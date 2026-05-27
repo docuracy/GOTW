@@ -23,7 +23,9 @@ AAT_FCLASS = {c["aat_id"]: c["fclass"] for c in _CONCEPTS}
 _VOL = re.compile(r"v(\w+?)(?:-ocr)?\.txt$|-v(\w+?)[-.]", re.I)
 # Match-certainty rank from the reconcile pass (1 = most certain), baked into the tiles so the map can
 # filter by certainty. Cumulative: a "show <= N" filter includes everything more certain. 5 = no pass.
-CERT_RANK = {"1-exact-in": 1, "2-phon-in": 2, "3-phon-broad": 3, "4-phon-cc": 4, "5-coords": 4}
+CERT_RANK = {"1-exact-in": 1, "2-phon-in": 2, "3-phon-broad": 3, "4-phon-cc": 4,
+             "coord-match": 1,   # name match within radius of authoritative printed coords — high certainty
+             "coord-only": 5}    # located by coords, NO WHG match — only shown at "all"
 LIGHT_KEYS = ("id", "name", "fclass", "cert")   # the only attributes baked into the vector tiles
 # Per-volume HathiTrust ids (the University of Minnesota scans we OCR'd) -> exact source-page deep links.
 HTIDS = {"1": "umn.31951001678068j", "2": "umn.31951001678069h", "3": "umn.31951001678070w",
@@ -88,6 +90,7 @@ def props_of(r):
         "whg_name": (recon.get("candidate") or {}).get("name"),   # the WHG match's primary toponym
         "whg_pass": recon.get("pass"),                            # reconcile pass that matched (exact/phonetic/…)
         "cert": CERT_RANK.get(recon.get("pass"), 5),              # certainty rank (1=best) for the map filter
+        "flags": recon.get("flags") or None,                      # low_confidence / coord_only / containment_fail
         "whg_score": r["whg_score"],
         "src": hathi_url(vol, r["page_start"]),
     }

@@ -34,10 +34,14 @@
     #pane select { font-family:system-ui,sans-serif; font-size:.76rem; flex:1 1 0; min-width:0; padding:.28rem .3rem;
                    border:1px solid var(--line); border-radius:4px; background:#fff; color:var(--ink); cursor:pointer; }
     /* info modal body */
-    .info-box { height:auto; max-height:88vh; }
-    .info-body { font-family:Georgia,serif; font-size:.9rem; line-height:1.55; }
-    .info-body h3 { font-size:.95rem; margin:1rem 0 .2rem; color:#6b6452; }
-    .info-body p { margin:.5rem 0; } .info-body a { color:#2a6f97; }
+    .info-box { width:min(680px,94vw); height:auto; max-height:90vh; }
+    .info-body { font-family:Georgia,serif; font-size:.92rem; line-height:1.6; color:#3a3526; }
+    .info-body h3 { font-size:1rem; margin:1.3rem 0 .3rem; color:#6b4a2a; }
+    .info-body p { margin:.6rem 0; } .info-body a { color:#2a6f97; }
+    .info-body ul, .info-body ol { margin:.5rem 0 .6rem 1.15rem; padding:0; }
+    .info-body li { margin:.35rem 0; }
+    .info-body .info-lede { font-size:1.06rem; line-height:1.5; color:#2a2519; }
+    .info-body .stats { margin:.8rem 0; padding:.5rem .75rem; background:#efeadf; border-radius:6px; font-size:.86rem; }
     .legend { position:absolute; bottom:18px; left:12px; background:rgba(244,241,234,.94);
               border:1px solid var(--line); border-radius:6px; padding:.5rem .7rem; font-size:.74rem;
               font-family:system-ui,sans-serif; line-height:1.7; box-shadow:0 1px 6px rgba(0,0,0,.12); }
@@ -72,7 +76,8 @@
                  border-radius:8px; box-shadow:0 8px 40px rgba(0,0,0,.4); display:flex; flex-direction:column; overflow:hidden; }
     .modal-head { display:flex; align-items:center; gap:1rem; padding:.6rem 1rem; border-bottom:1px solid var(--line); background:#efeadf; }
     .modal-head span { font-size:1rem; font-weight:bold; }
-    #reader-close { margin-left:auto; border:none; background:none; font-size:1.3rem; cursor:pointer; color:#6b6452; line-height:1; }
+    #reader-close, #info-close { margin-left:auto; border:none; background:none; font-size:1.5rem; cursor:pointer; color:#6b6452; line-height:1; padding:0 .15rem; }
+    #reader-close:hover, #info-close:hover { color:#1a2438; }
     .reader { overflow-y:auto; padding:1rem 1.4rem; flex:1; }
     .rvol { text-align:center; font-weight:bold; font-size:1rem; color:#6b6452; background:#efeadf;
             border-top:2px solid #c26b4a; border-bottom:1px solid var(--line); padding:.7rem; margin:.6rem -1.4rem 1rem; }
@@ -101,6 +106,8 @@
     #lightbox .lb-reports b { display:block; color:#f0b48a; margin-bottom:2px; font-weight:600; }
     #lightbox .lb-reports a { color:#9cc7e0; text-decoration:none; margin-right:10px; }
     #lightbox .lb-reports a:hover { text-decoration:underline; }
+    .pop .nomatch { color:#9a6b4a; }
+    .pop .pflag { margin:.3rem 0 0; color:#b45309; font-size:.8rem; }
     #lightbox .lb-hint { position:absolute; bottom:10px; left:0; right:0; text-align:center; pointer-events:none;
                          color:#aaa; font:12px system-ui,sans-serif; text-shadow:0 1px 2px #000; }
     .rhw { margin:0 0 .25rem; font-size:.95rem; letter-spacing:.02em; }
@@ -190,36 +197,54 @@
 
   <div class="modal" id="info-modal" hidden>
     <div class="modal-box info-box">
-      <div class="modal-head"><span>About this demonstrator</span><button id="info-close" title="Close (Esc)">✕</button></div>
+      <div class="modal-head"><span>About this project</span><button id="info-close" title="Close (Esc)" aria-label="Close">✕</button></div>
       <div class="reader info-body">
-        <p><b>A Gazetteer of the World</b> (Royal Geographical Society, 1856; 7 volumes, public domain) turned
-        into structured, typed, geolocated linked data — and explored here with <b>no application server</b>
-        (a static GitHub Pages site: vector-tile map, whole-corpus reader, in-browser search).</p>
-        <h3>Source &amp; OCR</h3>
-        <p>Built from the public-domain HathiTrust page scans. No inherited OCR (licence + quality): the pages
-        were re-OCR'd with the layout-aware <b>Surya</b> model on the Pitt CRC GPU cluster, with two-column
-        reading order reconstructed from line geometry.</p>
+        <p class="info-lede">👋 Welcome! This is an interactive map and reader of <b>A Gazetteer of
+        the World</b> — a seven-volume reference book published by the Royal Geographical Society in <b>1856</b>,
+        describing tens of thousands of places across the globe as they were known in the mid-19th century.</p>
+        <p>A <i>gazetteer</i> is a geographical dictionary: an alphabetical list of places, each with a short
+        description — where it is, what kind of place it is, its population, nearby features, and so on. We have
+        turned the original printed pages into data you can <b>search, map, and read</b>.</p>
+        <h3>What you can do here</h3>
+        <ul>
+          <li><b>Explore the map</b> — every marker is a place from the gazetteer, shown where we think it is today.</li>
+          <li><b>Search</b> — type a place name; old spellings and typos are tolerated.</li>
+          <li><b>Read</b> — open a volume and read the original entries, with the historical plates (engravings and maps) shown in place.</li>
+          <li><b>Check the source</b> — every entry links to the scanned page it came from.</li>
+        </ul>
         <h3>How it was made</h3>
-        <p>Every record is typed by a <b>self-hosted Llama-3.3-70B</b> (closed Getty-AAT enum); tables and plates
-        are digitised by <b>Qwen2.5-VL</b>; each place is reconciled to the
-        <a href="https://whgazetteer.org" target="_blank" rel="noopener">World Historical Gazetteer</a> by a
-        containment-aware cascade (resolve the admin parents to polygons, then match <i>inside</i> the parent
-        region). All LLM/VLM stages are self-hosted — no per-token cost.
-        <b>116,292 places · 84.8% reconciled · 1,774 tables · 133 plates.</b></p>
-        <h3>Caveats — please read</h3>
-        <p>This is a <b>research demonstrator, not an authority</b>. Reconciliation to the WHG is fully
-        <b>automatic and a work in progress</b>: <b>a great many matches are wrong</b> (a same-named place
-        elsewhere, or no real equivalent at all), and automatic matching of historical names will never be
-        fully resolved. Table and plate detection is <b>patchy</b> — some are missed, mislocated, or
-        mis-transcribed. Treat every located point, match, and digitised table as a <b>suggestion to verify
-        against the source page</b> (each record links to its scan), not as ground truth — and please flag
-        errors with the <b>⚑ Report</b> link in any popup or reader entry.</p>
-        <h3>Origin &amp; credits</h3>
-        <p>The project arose from Humphrey Southall's offer of his transcripts to Ruth Mostern and the resulting
-        discussion; it uses its own public-domain OCR rather than those transcripts. Source code &amp; method:
-        <a href="https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world" target="_blank" rel="noopener">github.com/WorldHistoricalGazetteer/gazetteer-of-the-world</a>.</p>
-        <p style="font-size:.8rem;color:#857d6c">Spotted a data error? Use the <b>⚑ Report</b> link in any place
-        popup or reader entry.</p>
+        <p>Nobody typed this in by hand — every step is automatic:</p>
+        <ol>
+          <li><b>Reading the pages.</b> We start from public-domain photographic scans of the book and use
+          <b>OCR</b> (“optical character recognition”) to turn the printed words back into editable text.</li>
+          <li><b>Understanding each entry.</b> A <b>large language model</b> — an “LLM”, the same kind of
+          AI behind chatbots, but here run on our own computers — reads each entry and pulls out structured facts:
+          the place name, the type of place, its country, coordinates, population, and so on.</li>
+          <li><b>Linking to a global index.</b> We then try to match each place to the
+          <a href="https://whgazetteer.org" target="_blank" rel="noopener"><b>World Historical Gazetteer</b></a>
+          (WHG) — a free academic project that gathers historical places from many sources into one searchable
+          index. A match gives the 1856 place a modern location, and sometimes a boundary outline. (This matching
+          step is called <b>reconciliation</b>.)</li>
+        </ol>
+        <p class="stats"><b>Over 116,000 places</b>, most linked to a modern location, plus <b>1,774 statistical
+        tables</b> and <b>133 historical plates</b> — all in a site that runs entirely in your browser, with no
+        server doing the work as you click.</p>
+        <h3>⚠️ How much to trust this</h3>
+        <p>Please treat this as a <b>research demonstrator, not an authority</b>. Because every step is automatic:</p>
+        <ul>
+          <li><b>Many matches are wrong.</b> An 1856 name may be linked to a same-named place somewhere else, or
+          to nothing at all. Matching historical names is genuinely hard and will never be perfect.</li>
+          <li><b>Locations can be off</b>, and some places are shown only by their printed coordinates, with no match found.</li>
+          <li><b>Tables and illustrations</b> are detected unevenly — some are missed or mis-read.</li>
+        </ul>
+        <p>So take everything here as a <b>suggestion to check against the original scanned page</b> (linked from
+        every record), not as fact. Spotted an error? The <b>⚑ Report</b> link in any place popup or reader
+        entry takes a few seconds and genuinely helps improve the data.</p>
+        <h3>Source &amp; credits</h3>
+        <p>The original book is public domain (page scans via HathiTrust). The project grew out of Humphrey
+        Southall’s offer of his transcripts to Ruth Mostern and the discussion that followed, though it uses
+        its own fresh OCR rather than those transcripts. The code and full method are
+        <a href="https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world" target="_blank" rel="noopener">on GitHub</a>.</p>
       </div>
     </div>
   </div>
@@ -301,7 +326,10 @@
 
   // reconcile.py's pass label -> a human-readable match mode shown in the popup
   const MATCH_MODE = { "1-exact-in": "exact name + containment", "2-phon-in": "phonetic + containment",
-    "3-phon-broad": "phonetic (broad)", "4-phon-cc": "phonetic + country", "5-coords": "coordinates" };
+    "3-phon-broad": "phonetic (broad)", "4-phon-cc": "phonetic + country",
+    "coord-match": "name match near printed coordinates" };
+  const FLAGS = { low_confidence: "\u26a0 low-confidence name match",
+    containment_fail: "\u26a0 printed coordinates fall outside the stated region" };
   function popupHTML(p) {
     // MapLibre serialises array/object properties to JSON strings — parse notes back.
     let notes = p.notes;
@@ -315,7 +343,10 @@
     if (notes.length) h += `<dt>Notes</dt><dd><ul>${notes.map(n=>`<li>${esc(n)}</li>`).join("")}</ul></dd>`;
     h += `</dl><p class="src">Source: Vol.&nbsp;${p.vol ?? "?"}, p.&nbsp;${p.page ?? "—"}` +
          (p.headword && p.headword !== p.name ? ` (under <em>${esc(p.headword)}</em>)` : "") +
-         `<br>WHG match: ${p.whg_name?`<em>${esc(p.whg_name)}</em> `:""}${whgLink(p.whg_id)}${p.whg_score!=null?` · score ${p.whg_score}`:""}${p.whg_pass?` · via ${MATCH_MODE[p.whg_pass]||esc(p.whg_pass)}`:""}</p>`;
+         `<br>${p.whg_id
+            ? `WHG match: ${p.whg_name?`<em>${esc(p.whg_name)}</em> `:""}${whgLink(p.whg_id)}${p.whg_score!=null?` · score ${p.whg_score}`:""}${p.whg_pass&&MATCH_MODE[p.whg_pass]?` · via ${MATCH_MODE[p.whg_pass]}`:""}`
+            : `<span class="nomatch">\ud83d\udccd Located by printed coordinates \u2014 no WHG match</span>`}</p>`
+         + (Array.isArray(p.flags) ? p.flags.filter(f=>FLAGS[f]).map(f=>`<p class="pflag">${FLAGS[f]}</p>`).join("") : "");
     h += `<div class="pop-actions">`;
     if (p.vol) h += `<button class="read-btn" data-vol="${esc(String(p.vol))}" data-page="${esc(String(p.page ?? ""))}"`
                   + ` data-hw="${esc(p.headword || p.name || "")}"${p.eid != null ? ` data-eid="${p.eid}"` : ""}`
@@ -911,6 +942,12 @@
     $("info-btn").addEventListener("click", () => { infoModal.hidden = false; document.body.style.overflow = "hidden"; });
     infoModal.addEventListener("click", e => { if (e.target === infoModal || e.target.id === "info-close") closeInfo(); });
     document.addEventListener("keydown", e => { if (e.key === "Escape" && !infoModal.hidden) closeInfo(); });
+    try {                                  // open the intro once, on a visitor's first visit, then remember
+      if (!localStorage.getItem("gotw_info_seen")) {
+        infoModal.hidden = false; document.body.style.overflow = "hidden";
+        localStorage.setItem("gotw_info_seen", "1");
+      }
+    } catch (e) {}
 
     const letSel = $("nav-letter");                        // A–Z options
     for (let c = 65; c <= 90; c++) { const o = document.createElement("option"); o.value = o.textContent = String.fromCharCode(c); letSel.appendChild(o); }
