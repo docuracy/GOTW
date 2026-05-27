@@ -14,10 +14,12 @@ far this pipeline adapts to other historical print gazetteers, and where it does
 
 Everything below is **static** — served from GitHub Pages, **no application server**, no database backend.
 
-- **Map (MapLibre + PMTiles).** Reconciled places are vector tiles in a single `.pmtiles` file, read by
-  *viewport* over HTTP range requests. At low zoom the map draws a **density heatmap** (weighted by a
-  clustered `point_count` baked in at tile-build time); zooming in **cross-fades to individual circles**.
-- **Light tiles, detail on demand.** Tiles carry only `id`/`name`/`fclass` (so they stay tiny); clicking a
+- **Map (MapLibre + PMTiles).** Reconciled places are vector tiles (`places.pmtiles`), read by *viewport*
+  over HTTP range requests. At low zoom the map draws a **density heatmap** (weighted by a clustered
+  `point_count` baked in at tile-build time); zooming in **cross-fades to individual circles**, filterable by
+  a cumulative **match-certainty** dropdown. A second tileset (`geometry.pmtiles`) overlays the **WHG boundary
+  polygons/lines** of matched places as faint outlines that bold-highlight the selected place.
+- **Light tiles, detail on demand.** Tiles carry only `id`/`name`/`fclass`/`cert` (so they stay tiny); clicking a
   place **fetches its full record** from a *sharded* JSON store (`detail/<id%N>.json`, cached per shard). The
   popup shows the extracted record — name, AAT feature type, country, admin hierarchy, population time-series,
   WHG match — plus a **"View source page"** deep-link to the exact HathiTrust scan and a **"Read full entry"**
@@ -54,8 +56,10 @@ A six-stage pipeline turns 7 volumes of 1856 print into typed, geolocated, linke
    series, ethnonyms).
 5. **Reconcile** — a **containment-aware cascade** against the WHG gateway: resolve each place's admin
    parents to WHG **polygons**, then exact/phonetic (Symphonym KNN) matches **scoped inside the parent**
-   (`contained_in`, `containment="exact"`) → country → printed-coordinate fallback; precision-first.
-   116k places, **84.8% matched, ~25% disambiguated by containment** (the right same-named instance).
+   (`contained_in`, `containment="exact"`) → country; precision-first. A **non-point tie-break** prefers a
+   polygon-bearing match among near-ties; and where an entry **prints its own coordinates** those are
+   authoritative (best name match within a radius, else *located-but-unmatched*). 116k places: **~95.6k matched
+   + ~4.3k located-but-unmatched + ~16.4k unmatched**, with same-named instances disambiguated by containment.
 6. **Publish** — export to PMTiles + the sharded detail store + the chunked reader + the FTS/Symphonym search
    indexes; deploy to Pages.
 

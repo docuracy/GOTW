@@ -39,8 +39,8 @@ The stages of *historical PDF → geolocated linked data*, and how this project 
 | **1. Parse to records** | Split the flow into one row per source record, keeping **provenance** (page). | Parse defensively: entries are delimited only by the ALL-CAPS-headword print convention — cross-references and continuations masquerade as entries; validate against spot-checks. |
 | **2. Model the target** | Decide the unit of interest and a controlled vocabulary for typing it. | Mine the *actual* descriptors for their categories; resolve to real Getty AAT ids and **validate every id** so a typo fails loudly. |
 | **3. Self-hosted LLM extraction** | Run every record through **self-hosted open models** for schema-constrained structured output. | Free (no per-token cost): a **primary extractor** (Llama-3.3-70B) + a **critic** (gpt-oss-120B) + a **repair** pass (Qwen3-thinking) on the flagged minority; closed AAT enum enforced; sharded across GPUs. Chosen by a 7-model A/B ([`docs/model-comparison.md`](docs/model-comparison.md)). |
-| **4. Reconcile / geolocate** | Match each place to WHG via a **containment-aware cascade**: resolve its admin parents to WHG polygons, then match **inside the parent region** (`contained_in`) before falling back to country, then printed coordinates. | Precision-first then recall; containment disambiguates same-named places and records the parent chain as partOf relations. **84.8% of 116k places matched, ~25% via the containment passes.** |
-| **5. Publish** | Export linked data; explore it. | A static, server-less GitHub Pages explorer: PMTiles map + density heatmap, whole-corpus reader, in-browser search (FTS5 + trigram fuzzy + Symphonym phonetic via ONNX), in-context error reporting — all "fetch only what you need", no backend. |
+| **4. Reconcile / geolocate** | Match each place to WHG via a **containment-aware cascade** (resolve admin parents to WHG polygons, then match **inside the parent region**, `contained_in`, before country). A **non-point tie-break** prefers a polygon-bearing match among near-ties. Where an entry prints its own **coordinates** they are authoritative: match the best name **within a radius** of the printed point, else keep it *located-but-unmatched*. | Precision-first then recall; containment disambiguates same-named places (recorded as partOf relations). **~95.6k of 116k matched + ~4.3k located-but-unmatched**; on-map boundary polygons quadrupled (≈13.6k). |
+| **5. Publish** | Export linked data; explore it. | A static, server-less **single-page** GitHub Pages explorer: PMTiles map (points + WHG boundary polygons) + density heatmap, whole-corpus reader, in-browser search (FTS5 + trigram fuzzy + Symphonym phonetic via ONNX), a match-certainty filter, shareable `#entry=` links, in-context error reporting — all "fetch only what you need", no backend. |
 
 **Infrastructure dependency.** Stages 0 and 3 require the **Pitt CRC GPU cluster** (Slurm + vLLM,
 conda envs `whg`/`vllm`, fast `/vast/ishi` storage); stage 4 queries the WHG reconciliation service.
@@ -52,8 +52,9 @@ The lighter steps (parse, AAT build, toponym dictionary) are plain Python (`pymu
 ## This project's pipeline
 
 ```
-PD scans ─Surya OCR─▶ volume.txt ─parse─▶ entry ─extract─▶ place ─reconcile─▶ WHG id + coords ─▶ MapLibre demo
-(vols 1-7) (GPU array) (## p.N)             │     Llama-3.3-70B     │      containment cascade: in-parent→country→coords
+PD scans ─Surya OCR─▶ volume.txt ─parse─▶ entry ─extract─▶ place ─reconcile─▶ WHG id + coords ─▶ MapLibre explorer
+(vols 1-7) (GPU array) (## p.N)             │     Llama-3.3-70B     │      containment cascade + non-point tie-break;
+                                                                   │      printed coords authoritative (else coord-only)
                                    toponym-check   (self-hosted vLLM) │      (WHG gateway via public API)
                                    (toponyms.json) + gpt-oss critic
                                                    + Qwen-thinking repair (flagged ~7-11%)
@@ -338,11 +339,21 @@ python3 process/reconcile.py --backend api --concurrency 6      # public-API fal
 python3 process/submit_reconcile_slurm.py                       # ingest + cascade as an htc CPU job
 ```
 
-A **containment-aware cascade**. First (gateway only) each place's `admin_hierarchy` is resolved
-top-down to WHG **polygon** parents — each `contained_in` the previously-resolved parent, the country
-level handled by the `ccodes` proxy — and the chain is recorded as Linked-Places `gvp:broaderPartitive`
-relations. The leaf then runs five passes, each only on the previous one's misses (precision first, then
-recall), thresholding on `score`:
+A **containment-aware cascade**, with two refinements added 2026-05: a **non-point tie-break** and a
+**coordinate-authoritative** path. First (gateway only) each place's `admin_hierarchy` is resolved top-down
+to WHG **polygon** parents — each `contained_in` the previously-resolved parent, the country level handled
+by the `ccodes` proxy — and the chain is recorded as Linked-Places `gvp:broaderPartitive` relations.
+
+**Places that print their own coordinates** (≈7.6k) are authoritative for *location* and skip the name
+cascade: they resolve to the best name match **within `GOTW_COORD_RADIUS_KM`=50 of the printed point** (a
+`bounds` query, no `ccodes`; nearest qualifying candidate wins, `low_confidence` if its name score is weak).
+If nothing matches in radius the place is kept **located-but-unmatched** (`coord-only`) — shown on the map at
+its printed point with no WHG id. This retired a large tail of planet-away phonetic mismatches (e.g.
+*Trevanion* had matched a place 19,446 km away). `process/flag_coord_containment.py` then cross-checks each
+printed point against its resolved admin parent (geom-store + Shapely point-in-polygon) and flags
+`containment_fail` where they disagree.
+
+**All other places** run four name passes, each only on the previous one's misses (precision first, then recall):
 
 | Pass | `mode` | spatial constraint |
 |---|---|---|
@@ -350,13 +361,13 @@ recall), thresholding on `score`:
 | **2** phon-in    | `phonetic` (Symphonym KNN) | `contained_in` narrowest parent, `intersects` |
 | **3** phon-broad | `phonetic` | `contained_in` next-broader parent |
 | **4** phon-cc    | `phonetic` | country only (`ccodes`) |
-| **5** coords     | `phonetic` | `bounds` box around the **printed** coords |
 
-`ccodes=[cc]` applies throughout. Containment uses `containment="exact"` (precise polygon test) — the
-gateway's `fuzzy`/H3 mode currently returns 0 even for genuinely-contained places. **Full corpus
-(116,292 places): 98,581 matched (84.8%), of which 28,849 are disambiguated by the containment passes**
-— the right instance *inside* its named parent, not merely a same-named place elsewhere in the country.
-Matches get `whg_match_id`, `whg_score`, the pass that found them, and a centroid.
+Within a pass, a **non-point tie-break** prefers a *polygon-bearing* candidate (`has_geom`) over a point when
+their scores are within `GOTW_GEOM_MARGIN` (=1.0) — same place, richer geometry — which quadrupled the on-map
+boundary polygons (3,174 → 13,635). `ccodes=[cc]` applies throughout; containment uses `containment="exact"`
+(the gateway's `fuzzy`/H3 mode currently returns 0 even for genuinely-contained places). **Full corpus
+(116,292): ~95.6k matched + ~4.3k located-but-unmatched (`coord-only`) + ~16.4k unmatched.** Matches get
+`whg_match_id`, `whg_score`, the pass, a centroid, and any `flags` (`low_confidence`/`coord_only`/`containment_fail`).
 
 **Two backends, same cascade** (`exact`/`phonetic`, country, and `bounds` are all honoured server-side;
 never filter by `types`/`fclasses` — sparsely populated, tanks recall; threshold on `score`, not the
@@ -414,15 +425,22 @@ handling the offset drift (16→80) caused by ~70 unpaginated steel plates that 
 - **A static, server-less explorer** — live at [worldhistoricalgazetteer.github.io/gazetteer-of-the-world/](https://worldhistoricalgazetteer.github.io/gazetteer-of-the-world/).
   Everything is served from **GitHub Pages with no backend**, leaning on "fetch only what you need" formats. It
   is deployed via a **GitHub Actions Pages artifact** (`.github/workflows/pages.yml`); the large generated files
-  live in a **GitHub Release** (`site-assets`, re-published by `process/publish_assets.sh`) so they're served
-  same-origin but kept out of git history. All JS libraries are **self-hosted** (`docs/lib/`, `docs/search/lib/`) —
-  no script CDNs (only the basemap *tiles* are third-party).
+  live in a **GitHub Release** (`site-assets`, re-published by `process/publish_assets.sh`: reader, plates, the
+  ≈42 MB `geometry.pmtiles`, the FTS DB, Symphonym) so they're served same-origin but kept out of git history.
+  The whole UI is a **single page** (`docs/index.html`; the old `map.html` was removed). All JS libraries are
+  **self-hosted** (`docs/lib/`, `docs/search/lib/`) — no script CDNs (only the basemap *tiles* are third-party).
   - **Map (PMTiles vector tiles).** `process/export_geojson.py` emits **light** NDJSON features (id/name/fclass,
-    a population factor, …) for `process/build_tiles.sh` → **tippecanoe** → `docs/places.pmtiles`, read by
-    viewport over HTTP range requests. **Low zoom = a density heatmap** (YlOrRd; weighted by the `point_count`
-    tippecanoe bakes via `--cluster-distance … -r1`) that **cross-fades to circles** as you zoom in; markers are
-    **scaled by population** (latest year, up to ~10×). Hover shows the name from the tile; **click fetches the
-    full record** from a **sharded detail store** (`docs/detail/<id%N>.json`).
+    a population factor, a `cert` rank, …) for `process/build_tiles.sh` → **tippecanoe** → `docs/places.pmtiles`,
+    read by viewport over HTTP range requests. **Low zoom = a density heatmap** (YlOrRd; weighted by the
+    `point_count` tippecanoe bakes via `--cluster-distance … -r1`) that **cross-fades to circles** as you zoom in;
+    markers are **scaled by population** (latest year, up to ~10×) and filterable by a cumulative **match-certainty**
+    dropdown. Hover shows the name from the tile; **click fetches the full record** from a **sharded detail store**
+    (`docs/detail/<id%N>.json`) — the popup shows the WHG **match toponym + match mode** and any **flags**
+    (`coord_only` = "located, no match" / `containment_fail`).
+  - **WHG boundary geometries.** `process/export_geometries.py` reads the actual polygons/lines of matched places
+    from the `/vast` geom-store (not ES `_source`) and tiles them into `docs/geometry.pmtiles` (release-hosted,
+    ≈42 MB) — faint dashed outlines above z5 that bold-highlight the selected place; a showcase of WHG's geometry
+    holdings (≈13.6k after the non-point tie-break).
   - **Whole-corpus reader.** "Read full entry" opens a modal that **lazy-loads the transcription of all seven
     volumes** (`process/export_reader.py` → chunked JSON + `index.json`), scrolled to the entry, DOM-windowed so
     memory stays bounded; tables render inline; per-page **HathiTrust source-page** deep links.
@@ -432,6 +450,9 @@ handling the offset drift (16→80) caused by ~70 unpaginated steel plates that 
     **Symphonym v7 in the browser** (an 8 MB int8 **ONNX** encoder via `onnxruntime-web` + precomputed int8
     headword embeddings — `process/export_symphonym_onnx.py`, `process/build_symphonym_index.py`). A geocoded hit
     flies the map + opens its popup; a non-geocoded hit opens the reader.
+  - **Sharing & deep links.** The examined place is mirrored in the URL as `#entry=<eid>`, so Back/Forward step
+    through the places you've looked at, and every popup/reader entry has a **🔗 Copy link** button. Opening such a
+    link re-opens the place (map popup if geocoded, else the reader), with a blocking spinner while the index loads.
   - **In-context curation.** Every popup and reader entry has a **⚑ Report** link → a pre-filled **GitHub issue**
     (Issue Form, anyone with a GitHub account; auto-labelled `explorer-report`, a workflow adds per-type labels,
     machine-readable `meta` + `?entry=` deep link for agent clustering). Popups/reader also **surface existing
