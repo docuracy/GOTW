@@ -109,6 +109,15 @@
     #lightbox .lb-reports a:hover { text-decoration:underline; }
     .pop .nomatch { color:#9a6b4a; }
     .pop .pflag { margin:.3rem 0 0; color:#b45309; font-size:.8rem; }
+    #loading { position:fixed; inset:0; z-index:10000; display:none; background:rgba(26,36,56,.45); }
+    #loading.on { display:flex; align-items:center; justify-content:center; }
+    #loading .ld-box { display:flex; gap:.8rem; align-items:center; background:var(--paper); border:1px solid var(--line);
+                       border-radius:8px; padding:1rem 1.3rem; box-shadow:0 4px 22px rgba(0,0,0,.28); max-width:78vw; }
+    #loading .ld-spin { flex:none; width:20px; height:20px; border:3px solid #cdd5e0; border-top-color:#2a6f97;
+                        border-radius:50%; animation:ld-rot .8s linear infinite; }
+    #loading .ld-msg { font:600 14px Georgia,serif; color:var(--ink); }
+    #loading .ld-sub { font:12px system-ui,sans-serif; color:#6b6452; margin-top:.15rem; }
+    @keyframes ld-rot { to { transform:rotate(360deg); } }
     #lightbox .lb-hint { position:absolute; bottom:10px; left:0; right:0; text-align:center; pointer-events:none;
                          color:#aaa; font:12px system-ui,sans-serif; text-shadow:0 1px 2px #000; }
     .rhw { margin:0 0 .25rem; font-size:.95rem; letter-spacing:.02em; }
@@ -682,14 +691,27 @@
     map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 8) });
     openPlacePopup(ll, +pid, name);
   }
-  async function openEntry(eidStr) {            // ?entry=<eid> deep link (e.g. from an error-report issue)
+  function showLoading(msg, sub) {                 // blocking overlay while a share/hash link loads its index
+    let el = document.getElementById("loading");
+    if (!el) { el = document.createElement("div"); el.id = "loading"; document.body.appendChild(el); }
+    el.innerHTML = `<div class="ld-box"><div class="ld-spin"></div><div><div class="ld-msg">${esc(msg || "Loading…")}</div>`
+      + (sub ? `<div class="ld-sub">${esc(sub)}</div>` : "") + `</div></div>`;
+    el.classList.add("on");
+  }
+  function hideLoading() { const el = document.getElementById("loading"); if (el) el.classList.remove("on"); }
+
+  async function openEntry(eidStr) {            // ?entry= / #entry= deep link (reports, shared links, Back/Forward)
     const eid = parseInt(eidStr, 10); if (!Number.isFinite(eid)) return;
-    await geocodedMap();
-    let row = null;                             // locate vol/page/rc/headword from the FTS doc table (covers all entries)
-    try { const w = await searchDb(true); row = (await w.db.query("SELECT vol,page,rc,headword FROM doc WHERE eid=?", [eid]))[0]; } catch {}
-    const g = GEO[eid];
-    if (g) { const ll = [g[0], g[1]]; map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 8) }); openPlacePopup(ll, g[2], row && row.headword); }
-    else if (row) openReader(row.vol, row.page, row.headword, eid, row.rc);
+    const cold = !DBW;                          // index not yet loaded -> block with a spinner (the slow path)
+    if (cold) showLoading("Opening place…", "Loading the place index — this can take a few seconds on a first visit.");
+    try {
+      await geocodedMap();
+      let row = null;                           // locate vol/page/rc/headword from the FTS doc table (covers all entries)
+      try { const w = await searchDb(true); row = (await w.db.query("SELECT vol,page,rc,headword FROM doc WHERE eid=?", [eid]))[0]; } catch {}
+      const g = GEO[eid];
+      if (g) { const ll = [g[0], g[1]]; map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 8) }); await openPlacePopup(ll, g[2], row && row.headword); }
+      else if (row) await openReader(row.vol, row.page, row.headword, eid, row.rc);
+    } finally { if (cold) hideLoading(); }
   }
   // Zoomable full-screen plate viewer: scroll to zoom (about the cursor), drag to pan, double-click to reset.
   const LB = { s: 1, tx: 0, ty: 0, nw: 0, nh: 0, rot: 0, drag: null, src: null };
