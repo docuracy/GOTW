@@ -203,7 +203,7 @@ local precursor to a planned gazetteer-agnostic QA module on the WHG/Django plat
 
 **Corpus status — the full pipeline has run end-to-end.** All **seven volumes** are OCR'd (table-aware),
 parsed, extracted, table/plate-digitised, reconciled, and published. Working store `data/gotw_seg.sqlite`:
-**89,816 entries → 116,292 places** (84.8% reconciled to WHG), **1,774 vision tables** + **133 plates**
+**89,816 entries → 116,292 places** (~95.6k reconciled to WHG + ~4.3k located-but-unmatched), **1,774 vision tables** + **133 plates**
 embedded in the reader. Volume I alone is ~11.4k entries · ~813 cross-references · ~1,426 multi-place
 entries (via `—Also`), pages 3–896. The repo lives at
 [`WorldHistoricalGazetteer/gazetteer-of-the-world`](https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world);
