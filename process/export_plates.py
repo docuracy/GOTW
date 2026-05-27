@@ -22,6 +22,10 @@ from PIL import Image
 
 IMG_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
 HEAD = re.compile(r"## p\. (\S+) \(#(\d+)\)")
+# Manual orientation corrections (additional CW degrees per "<vol>/p<idx>.jpg") from explorer lightbox
+# reports, applied by process/apply_plate_orientation.py. Read here so a re-run keeps them. {} if absent.
+_OVR = Path("data/plate_orientation_overrides.json")
+PLATE_ORIENT_OVERRIDES = json.loads(_OVR.read_text()) if _OVR.exists() else {}
 VL_BASE = os.environ.get("PLATE_VL_BASE", os.environ.get("TABLE_VL_BASE", "http://localhost:8000/v1"))
 VL_MODEL = os.environ.get("PLATE_VL_MODEL", os.environ.get("TABLE_VL_MODEL", "qwen2.5-vl"))
 INK_MIN, INK_MAX = 0.02, 0.55          # below = blank/library-stamp; above = marbled endpaper
@@ -166,10 +170,12 @@ def main():
         recs, kinds = [], Counter()
         for idx, kind, title in sorted(plates):
             im = Image.open(files[idx]).convert("RGB")
-            if args.orient and rec is not None:
-                deg = best_rotation(im, rec, det)
-                if deg:
-                    im = im.rotate(-deg, expand=True)
+            # Surya auto-orientation + any manual correction reported via the explorer lightbox and applied by
+            # process/apply_plate_orientation.py (recorded as additional CW degrees, so re-runs stay corrected).
+            base = best_rotation(im, rec, det) if (args.orient and rec is not None) else 0
+            deg = (base + PLATE_ORIENT_OVERRIDES.get(f"{args.volume}/p{idx:05d}.jpg", 0)) % 360
+            if deg:
+                im = im.rotate(-deg, expand=True)
             web = im.copy(); web.thumbnail((args.max_px, args.max_px))
             web.save(outdir / f"p{idx:05d}.jpg", "JPEG", quality=82)
             recs.append({"idx": idx, "after_page": apm.get(idx), "kind": kind, "title": title,

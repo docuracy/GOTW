@@ -201,7 +201,7 @@
       <div class="reader info-body">
         <p class="info-lede">👋 Welcome! This is an interactive map and reader of <b>A Gazetteer of
         the World</b> — a seven-volume reference book published by the Royal Geographical Society in <b>1856</b>,
-        describing tens of thousands of places across the globe as they were known in the mid-19th century.</p>
+        describing tens of thousands of places across the globe as they were known in the mid-19th century. The work named no author; its anonymous editor is now identified as <a href="https://en.wikipedia.org/wiki/George_Godfrey_Cunningham" target="_blank" rel="noopener">George Godfrey Cunningham</a>.</p>
         <p>A <i>gazetteer</i> is a geographical dictionary: an alphabetical list of places, each with a short
         description — where it is, what kind of place it is, its population, nearby features, and so on. We have
         turned the original printed pages into data you can <b>search, map, and read</b>.</p>
@@ -213,19 +213,36 @@
           <li><b>Check the source</b> — every entry links to the scanned page it came from.</li>
         </ul>
         <h3>How it was made</h3>
-        <p>Nobody typed this in by hand — every step is automatic:</p>
+        <p>Nobody typed this in by hand — every step is automatic, and uses freely-available AI models run on
+        our own computers (no per-use fees, nothing sent to outside services):</p>
         <ol>
-          <li><b>Reading the pages.</b> We start from public-domain photographic scans of the book and use
-          <b>OCR</b> (“optical character recognition”) to turn the printed words back into editable text.</li>
-          <li><b>Understanding each entry.</b> A <b>large language model</b> — an “LLM”, the same kind of
-          AI behind chatbots, but here run on our own computers — reads each entry and pulls out structured facts:
-          the place name, the type of place, its country, coordinates, population, and so on.</li>
+          <li><b>Reading the pages.</b> We start from public-domain photographic scans of the book and turn the
+          printed words back into text with <b>OCR</b> (“optical character recognition”), using the layout-aware
+          <a href="https://github.com/datalab-to/surya" target="_blank" rel="noopener">Surya</a> model.</li>
+          <li><b>Understanding each entry.</b> A <b>large language model</b> (“LLM” — the kind of AI behind
+          chatbots) reads each entry and pulls out structured facts: the place name, the type of place, its
+          country, coordinates, population, and so on. We use the open
+          <a href="https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct" target="_blank" rel="noopener">Llama&nbsp;3.3</a>,
+          with <a href="https://github.com/openai/gpt-oss" target="_blank" rel="noopener">gpt-oss</a> double-checking
+          its work and <a href="https://github.com/QwenLM/Qwen3" target="_blank" rel="noopener">Qwen3</a> repairing
+          the cases it flags.</li>
+          <li><b>Reading the tables and pictures.</b> The statistical tables and the engraved plates (town views
+          and maps) are read by a <i>vision</i> model,
+          <a href="https://github.com/QwenLM/Qwen2.5-VL" target="_blank" rel="noopener">Qwen2.5-VL</a>.</li>
           <li><b>Linking to a global index.</b> We then try to match each place to the
           <a href="https://whgazetteer.org" target="_blank" rel="noopener"><b>World Historical Gazetteer</b></a>
           (WHG) — a free academic project that gathers historical places from many sources into one searchable
           index. A match gives the 1856 place a modern location, and sometimes a boundary outline. (This matching
           step is called <b>reconciliation</b>.)</li>
         </ol>
+        <p>Each place is also given a <b>feature type</b> (city, river, mountain, ruin…) chosen from the Getty
+        <a href="https://www.getty.edu/research/tools/vocabularies/aat/" target="_blank" rel="noopener">Art &amp;
+        Architecture Thesaurus</a> (AAT), a shared published vocabulary in which every term has a stable web
+        address. Using such shared identifiers instead of free-text labels is what lets this data be <b>linked</b>
+        to other datasets — the idea behind <i>Linked Open Data</i> — rather than sitting in an isolated silo.</p>
+        <p>All of this is <b>very much a work in progress</b>. The typing and fact-extraction are only as good as
+        the instructions given to the language model, and can be improved simply by refining that prompt and
+        re-running the extraction.</p>
         <p class="stats"><b>Over 116,000 places</b>, most linked to a modern location, plus <b>1,774 statistical
         tables</b> and <b>133 historical plates</b> — all in a site that runs entirely in your browser, with no
         server doing the work as you click.</p>
@@ -242,8 +259,10 @@
         entry takes a few seconds and genuinely helps improve the data.</p>
         <h3>Source &amp; credits</h3>
         <p>The original book is public domain (page scans via HathiTrust). The project grew out of Humphrey
-        Southall’s offer of his transcripts to Ruth Mostern and the discussion that followed, though it uses
-        its own fresh OCR rather than those transcripts. The code and full method are
+        Southall’s offer of his transcripts to the <b>WHG</b> and the discussion that followed, though it uses
+        its own fresh OCR rather than those transcripts. The heavy computation ran on the HTC and H2P clusters at
+        the <b>University of Pittsburgh Center for Research Computing and Data</b> (RRID:SCR_022735), supported by
+        NIH award S10OD028483 and NSF award OAC-2117681. The code and full method are
         <a href="https://github.com/WorldHistoricalGazetteer/gazetteer-of-the-world" target="_blank" rel="noopener">on GitHub</a>.</p>
       </div>
     </div>
@@ -329,7 +348,7 @@
     "3-phon-broad": "phonetic (broad)", "4-phon-cc": "phonetic + country",
     "coord-match": "name match near printed coordinates" };
   const FLAGS = { low_confidence: "\u26a0 low-confidence name match",
-    containment_fail: "\u26a0 printed coordinates fall outside the stated region" };
+    containment_fail: "\u24d8 printed coordinates lie outside its modern administrative region" };
   function popupHTML(p) {
     // MapLibre serialises array/object properties to JSON strings — parse notes back.
     let notes = p.notes;

@@ -436,6 +436,15 @@ handling the offset drift (16→80) caused by ~70 unpaginated steel plates that 
     (Issue Form, anyone with a GitHub account; auto-labelled `explorer-report`, a workflow adds per-type labels,
     machine-readable `meta` + `?entry=` deep link for agent clustering). Popups/reader also **surface existing
     reports** for the entry (cached Issues lookup). See [`WHG-LESSONS.md`](WHG-LESSONS.md) for the broader design.
+    - **Processing the reports (maintainer side).** Plate-orientation reports — filed by the lightbox's
+      **⚑ orientation** button as `[plate orientation]` issues — are cleared by
+      **`process/apply_plate_orientation.py`** (run from the repo root whenever they accumulate). It rotates
+      each plate by the reported clockwise angle, records a **cumulative override** in
+      `data/plate_orientation_overrides.json` (read by `export_plates.py`, so a full pipeline re-run keeps the
+      fix instead of reverting to Surya's auto-orientation), **closes each processed issue** with a comment,
+      and re-publishes `plates.tar` to the `site-assets` release — then trigger a Pages deploy for the
+      corrected plates to go live. `--dry-run` previews; `--no-publish` skips the upload. Needs `gh`
+      (authenticated) + Pillow.
   - The current demo is an **early sample**; it regenerates from the full Llama extraction + 3-pass reconciliation
     (one rebuild produces tiles + detail + reader + search + Symphonym embeddings + the HathiTrust links).
 
