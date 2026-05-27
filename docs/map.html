@@ -22,6 +22,7 @@
             background:rgba(244,241,234,.96); border:1px solid var(--line); border-radius:8px;
             box-shadow:0 2px 14px rgba(0,0,0,.2); padding:.55rem .65rem; font-family:system-ui,sans-serif; }
     #pane h1 { font-family:Georgia,serif; font-size:1rem; margin:0 0 .45rem; display:flex; align-items:center; gap:.4rem; }
+    .whg-logo { height:1.5em; width:auto; flex:none; vertical-align:middle; }
     #pane .info-btn { margin-left:auto; cursor:pointer; border:1px solid var(--line); background:#fff; color:#2a6f97;
                       border-radius:50%; width:1.45rem; height:1.45rem; font-size:.9rem; line-height:1; padding:0; }
     #pane .info-btn:hover { background:#eaf2f7; }
@@ -157,7 +158,7 @@
 </head>
 <body>
   <div id="pane">
-    <h1>Gazetteer of the World (1856)
+    <h1><img class="whg-logo" src="./whg_logo.svg" alt="World Historical Gazetteer">Gazetteer of the World (1856)
       <button id="info-btn" class="info-btn" title="About this project &amp; source">ⓘ</button></h1>
     <div class="search-wrap">
       <input id="q" type="search" placeholder="Search names + full text…" autocomplete="off" />
@@ -197,10 +198,10 @@
 
   <div class="modal" id="info-modal" hidden>
     <div class="modal-box info-box">
-      <div class="modal-head"><span>About this project</span><button id="info-close" title="Close (Esc)" aria-label="Close">✕</button></div>
+      <div class="modal-head"><img class="whg-logo" src="./whg_logo.svg" alt="World Historical Gazetteer"><span>About this project</span><button id="info-close" title="Close (Esc)" aria-label="Close">✕</button></div>
       <div class="reader info-body">
-        <p class="info-lede">👋 Welcome! This is an interactive map and reader of <b>A Gazetteer of
-        the World</b> — a seven-volume reference book published by the Royal Geographical Society in <b>1856</b>,
+        <p class="info-lede">👋 Welcome! This is a project of the <a href="https://whgazetteer.org" target="_blank" rel="noopener"><b>World Historical Gazetteer</b></a> (WHG) — an interactive map and reader of <b>A Gazetteer of
+        the World</b>, a seven-volume reference book published by the Royal Geographical Society in <b>1856</b>,
         describing tens of thousands of places across the globe as they were known in the mid-19th century. The work named no author; its anonymous editor is now identified as <a href="https://en.wikipedia.org/wiki/George_Godfrey_Cunningham" target="_blank" rel="noopener">George Godfrey Cunningham</a>.</p>
         <p>A <i>gazetteer</i> is a geographical dictionary: an alphabetical list of places, each with a short
         description — where it is, what kind of place it is, its population, nearby features, and so on. We have
